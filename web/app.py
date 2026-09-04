@@ -210,11 +210,11 @@ def equipo_stats(league_code: str, team_name: str):
 
 @app.post("/api/actualizar/{league_code}")
 def actualizar(league_code: str):
-    """Actualiza datos reales de la liga desde API-Football.
+    """Actualiza datos reales de la liga desde API-Football usando standings.
 
-    Recorre los equipos de la liga, obtiene stats reales de la temporada
-    actual (cacheado y respetando el límite diario de 100 requests) y los
-    guarda en la DB. Si no hay API configurada, responde con un aviso.
+    Hace 1 request por liga al endpoint /standings que devuelve TODOS los
+    equipos con sus stats básicas (posición, partidos, goles, ganados/empatados/perdidos).
+    Guarda cada equipo en la DB con su api_id para poder obtener stats detalladas después.
     """
     info = get_league_info(league_code)
     if not info:
@@ -237,75 +237,139 @@ def actualizar(league_code: str):
     league_api_id = info["api_league_id"]
     season = _current_season()
 
+    # Un solo request para toda la tabla de posiciones
+    standings = api.fetch_and_store_standings(league_api_id, season)
+
+    if not standings:
+        raise HTTPException(502, detail={
+            "action": "sin_datos",
+            "message": "No se pudieron obtener datos de la liga. "
+                       "Verifica que la temporada y liga sean correctas.",
+            "requests_used": api.request_count,
+        })
+
     updated = 0
     failed = 0
-    teams = info["teams"]
 
-    for team_name in teams:
+    catalog_teams = {t: False for t in info["teams"]}
+
+    for team_name, stats in standings.items():
+        # Buscar equipo por nombre exacto o aproximado
+        matched = _match_team_name(team_name, catalog_teams)
+        if not matched:
+            continue
+
+        catalog_teams[matched] = True  # marcado como actualizado
+
         try:
-            ok = _fetch_and_store_team(api, db, team_name, league_code,
-                                       league_api_id, season)
-            if ok:
-                updated += 1
+            # Guardar o actualizar equipo con su api_id
+            team_row = db.query_one(
+                "SELECT id FROM teams WHERE name = ? AND league = ?",
+                (matched, league_code),
+            )
+            if team_row:
+                team_local_id = team_row["id"]
+                db.execute(
+                    "UPDATE teams SET api_id = ? WHERE id = ?",
+                    (stats["team_api_id"], team_local_id),
+                )
             else:
-                failed += 1
+                team_local_id = db.upsert_team(
+                    matched, league_code, stats["team_api_id"]
+                )
+
+            # Guardar stats de temporada
+            db.upsert_team_stats(team_local_id, {
+                "season": season,
+                "league": league_code,
+                "position": stats.get("position"),
+                "played": stats.get("played", 0),
+                "won": stats.get("won", 0),
+                "drawn": stats.get("drawn", 0),
+                "lost": stats.get("lost", 0),
+                "goals_for": stats.get("goals_for", 0),
+                "goals_against": stats.get("goals_against", 0),
+                "shots_on_target": 0,
+                "corners": 0,
+                "possession_avg": 0.0,
+                "home_won": 0,
+                "home_drawn": 0,
+                "home_lost": 0,
+                "home_goals_for": 0,
+                "home_goals_against": 0,
+                "away_won": 0,
+                "away_drawn": 0,
+                "away_lost": 0,
+                "away_goals_for": 0,
+                "away_goals_against": 0,
+            })
+            updated += 1
         except Exception as e:
-            logger.warning(f"Error actualizando {team_name}: {e}")
+            logger.warning(f"Error guardando stats de {matched}: {e}")
             failed += 1
 
-    # Resetear cache del servicio (los datos reales cambian)
+    # Equipos del catálogo que no se encontraron en el standings
+    not_found = [t for t, ok in catalog_teams.items() if not ok]
+
     _reset_stats_service()
 
     return {
         "action": "actualizado",
-        "message": f"Actualización desde API-Football completada.",
+        "message": f"Tabla de posiciones actualizada. "
+                   f"Equipos actualizados: {updated} · Fallidos: {failed} · "
+                   f"No encontrados en standings: {len(not_found)}",
         "teams_updated": updated,
         "teams_failed": failed,
+        "teams_not_found": not_found,
         "requests_used": api.request_count,
         "daily_limit": api.DAILY_LIMIT,
+        "has_more": False,
     }
 
 
-def _fetch_and_store_team(api, db, team_name: str, league_code: str,
-                          league_api_id: int, season: str) -> bool:
-    """Obtiene stats reales de un equipo y las guarda en la DB."""
-    # Resolver/cachear api_id
-    team_row = db.query_one(
-        "SELECT id, api_id FROM teams WHERE name = ? AND league = ?",
-        (team_name, league_code),
-    )
-    if team_row and team_row["api_id"]:
-        api_id = team_row["api_id"]
-        team_local_id = team_row["id"]
-    elif team_row:
-        api_id = api.resolve_team_id(team_name, league_code)
-        team_local_id = team_row["id"]
-    else:
-        api_id = api.resolve_team_id(team_name, league_code)
-        team_local_id = db.upsert_team(team_name, league_code, api_id)
+def _match_team_name(api_name: str, catalog: dict) -> Optional[str]:
+    """Busca un nombre de equipo del catálogo que coincida con el nombre de la API.
 
-    if not api_id:
-        logger.warning(f"No se pudo resolver api_id para {team_name}")
-        return False
+    Usa coincidencia normalizada y aliases para nombres conocidos diferentes.
+    """
+    import unicodedata
 
-    # Ya hay stats reales de esta temporada?
-    existing = db.get_team_stats(team_local_id, season)
-    if existing:
-        return True  # ya está en cache/DB
+    # Aliases: nombre del catálogo → variantes de la API
+    ALIASES = {
+        "Athletic Bilbao": ["Athletic Club", "Athletic Bilbao"],
+        "Valencia CF": ["Valencia", "Valencia CF"],
+    }
 
-    stats = api.fetch_and_store_season_stats(
-        team_local_id, league_api_id, season, api_id, league_code
-    )
-    if not stats:
-        logger.warning(f"Sin stats para {team_name} (temporada {season})")
-        return False
+    def normalize(s):
+        nfkd = unicodedata.normalize("NFKD", s.lower().strip())
+        return "".join(c for c in nfkd if not unicodedata.combining(c))
 
-    return True
+    api_norm = normalize(api_name)
+
+    # Buscar por aliases
+    for catalog_name, variants in ALIASES.items():
+        if catalog_name not in catalog:
+            continue
+        for variant in variants:
+            if normalize(variant) == api_norm:
+                return catalog_name
+
+    # Coincidencia directa por nombre normalizado
+    for catalog_name in catalog:
+        cat_norm = normalize(catalog_name)
+        if api_norm == cat_norm:
+            return catalog_name
+        if cat_norm in api_norm or api_norm in cat_norm:
+            return catalog_name
+    return None
 
 
 def _current_season() -> str:
+    """Devuelve la temporada accesible para el plan gratuito (2022-2024)."""
     from datetime import date
-    return str(date.today().year - 1)
+    year = date.today().year
+    # El plan gratuito solo tiene acceso a temporadas 2022-2024
+    return str(min(year - 1, 2024))
 
 
 def _reset_stats_service() -> None:

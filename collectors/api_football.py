@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Optional
 
 import requests
@@ -12,13 +13,20 @@ logger = logging.getLogger(__name__)
 class APIFootballClient:
     """Cliente para la API v3 de API-Football (https://www.api-football.com/).
 
-    Diseñado para minimizar el consumo del plan gratuito (100 requests/día):
+    Diseñado para respetar los límites del plan gratuito:
+    - 100 requests/día (límite global).
+    - ~10 requests/minuto (límite de tasa).
+
+    Estrategia:
     - Cachea agresivamente todas las respuestas.
     - Reutiliza api_id guardado en la DB en vez de re-buscar equipos.
-    - Contador de requests para avisar cuándo queda poco margen.
+    - Cuenta requests diarios y añade un retardo entre peticiones para no
+      exceder el límite por minuto.
     """
 
     DAILY_LIMIT = 100
+    MINUTE_LIMIT = 10
+    MIN_INTERVAL = 6.0  # segundos entre requests para no pasar 10/min
 
     def __init__(self, db: Optional[Database] = None):
         self.api_key = Config.API_FOOTBALL_KEY
@@ -27,12 +35,14 @@ class APIFootballClient:
         self.session = requests.Session()
         self.session.headers.update({"x-apisports-key": self.api_key})
         self._request_count = 0
+        self._last_request_time = 0.0
 
     @property
     def request_count(self) -> int:
         return self._request_count
 
-    def _request(self, endpoint: str, params: dict = None, use_cache: bool = True):
+    def _request(self, endpoint: str, params: dict = None, use_cache: bool = True,
+                 retries: int = 2):
         cache_key = f"api_football:{endpoint}:{params if params else ''}"
         if use_cache:
             cached = self.db.cache_get(cache_key)
@@ -49,36 +59,67 @@ class APIFootballClient:
             )
             return None
 
-        url = f"{self.base_url}/{endpoint}"
-        try:
-            resp = self.session.get(url, params=params, timeout=15)
-            self._request_count += 1
-            resp.raise_for_status()
-            data = resp.json()
+        for attempt in range(retries + 1):
+            # Throttle: respetar el intervalo mínimo entre requests
+            elapsed = time.time() - self._last_request_time
+            if elapsed < self.MIN_INTERVAL:
+                time.sleep(self.MIN_INTERVAL - elapsed)
 
-            if data.get("results", 0) == 0 and "errors" in data and data["errors"]:
-                logger.warning(f"API-Football sin resultados para {endpoint}: {data['errors']}")
+            url = f"{self.base_url}/{endpoint}"
+            try:
+                resp = self.session.get(url, params=params, timeout=20)
+                self._request_count += 1
+                self._last_request_time = time.time()
+                resp.raise_for_status()
+                data = resp.json()
 
-            if use_cache:
-                import json
-                self.db.cache_set(cache_key, data, ttl_hours=Config.CACHE_TTL_HOURS)
-            return data
-        except requests.RequestException as e:
-            logger.error(f"Error en API-Football ({endpoint}): {e}")
-            return None
+                # Detectar límite de tasa alcanzado
+                errors = data.get("errors", {}) or {}
+                if "rateLimit" in errors:
+                    logger.warning(
+                        f"Rate limit en {endpoint} (intento {attempt+1}). Esperando..."
+                    )
+                    time.sleep(10)  # esperar a que se libere la tasa
+                    continue
 
-    def search_team(self, team_name: str) -> Optional[int]:
-        """Busca el ID del equipo por nombre (con cacheo)."""
-        data = self._request("teams", {"search": team_name})
+                if data.get("results", 0) == 0:
+                    logger.warning(
+                        f"API-Football sin resultados para {endpoint}: {data['errors']}"
+                    )
+
+                if use_cache:
+                    import json
+                    self.db.cache_set(cache_key, data, ttl_hours=Config.CACHE_TTL_HOURS)
+                return data
+            except requests.RequestException as e:
+                logger.error(f"Error en API-Football ({endpoint}): {e}")
+                if attempt < retries:
+                    time.sleep(3)
+                    continue
+                return None
+
+        return None
+
+    def search_team(self, team_name: str, league_id: Optional[int] = None) -> Optional[int]:
+        """Busca el ID del equipo por nombre (con cacheo).
+
+        Si se proporciona league_id, filtra por esa liga (más preciso).
+        """
+        params = {"search": team_name}
+        if league_id is not None:
+            params["league"] = league_id
+        data = self._request("teams", params)
         if not data or data.get("results", 0) == 0:
             return None
         return data["response"][0]["team"]["id"]
 
-    def resolve_team_id(self, team_name: str, league: str = "") -> Optional[int]:
+    def resolve_team_id(self, team_name: str, league: str = "",
+                        league_api_id: Optional[int] = None) -> Optional[int]:
         """Devuelve el api_id del equipo reutilizando el guardado en la DB.
 
         Es el método recomendado para minimizar requests, ya que evita
         re-buscar un equipo que ya se resolvió antes.
+        Si league_api_id se proporciona, filtra por liga para mayor precisión.
         """
         row = self.db.query_one(
             "SELECT api_id FROM teams WHERE name = ? AND (? = '' OR league = ?)",
@@ -87,7 +128,7 @@ class APIFootballClient:
         if row and row["api_id"]:
             return row["api_id"]
 
-        api_id = self.search_team(team_name)
+        api_id = self.search_team(team_name, league_id=league_api_id)
         if api_id:
             self.db.upsert_team(team_name, league, api_id)
         return api_id
@@ -253,6 +294,39 @@ class APIFootballClient:
             if league_name.lower() in league["league"]["name"].lower():
                 return league["league"]["id"]
         return data["response"][0]["league"]["id"]
+
+    def fetch_and_store_standings(self, league_api_id: int, season: str) -> dict:
+        """Obtiene la tabla de posiciones de una liga y guarda stats en la DB.
+
+        Retorna dict con team_id → stats básicas. Solo hace 1 request.
+        """
+        data = self._request("standings", {"league": league_api_id, "season": season})
+        if not data or data.get("results", 0) == 0:
+            return {}
+
+        result = {}
+        for league_entry in data.get("response", []):
+            for standings in league_entry.get("league", {}).get("standings", []):
+                for row in standings:
+                    team_info = row.get("team", {})
+                    team_name = team_info.get("name", "")
+                    team_api_id = team_info.get("id")
+                    all_stats = row.get("all", {})
+                    all_goals = all_stats.get("goals", {})
+
+                    result[team_name] = {
+                        "team_api_id": team_api_id,
+                        "position": row.get("rank"),
+                        "played": all_stats.get("played", 0),
+                        "won": all_stats.get("win", 0),
+                        "drawn": all_stats.get("draw", 0),
+                        "lost": all_stats.get("lose", 0),
+                        "goals_for": all_goals.get("for", 0),
+                        "goals_against": all_goals.get("against", 0),
+                        "goals_diff": row.get("goalsDiff", 0),
+                        "points": row.get("points", 0),
+                    }
+        return result
 
 
 def db_team_id_for(name_a: str, name_b: str, candidate: str,

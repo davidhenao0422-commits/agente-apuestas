@@ -253,12 +253,15 @@ async function actualizarDatos(leagueCode) {
   if (statusDiv) statusDiv.innerHTML = '';
   try {
     const data = await fetchJson(`/api/actualizar/${leagueCode}`, { method: 'POST' });
-    refresh.textContent = '✅ Actualizado';
-    if (statusDiv) statusDiv.innerHTML = `<div class="notice">${data.message} Actualizados: ${data.teams_updated} · Requests usados ${data.requests_used}/${data.daily_limit}</div>`;
-    // Recargar equipos para ver datos reales
+    refresh.textContent = '✅ Listo';
+    if (statusDiv) {
+      const msg = data.message || 'Completado';
+      const extra = data.requests_used ? ` (requests usados: ${data.requests_used}/${data.daily_limit})` : '';
+      statusDiv.innerHTML = `<div class="notice">${msg}${extra}</div>`;
+    }
     await cargarEquipos();
   } catch (e) {
-    refresh.textContent = '⚠️ Actualización no disponible';
+    refresh.textContent = '⚠️ Reintentar';
     if (statusDiv) statusDiv.innerHTML = `<div class="notice">${e.message}</div>`;
   } finally {
     setTimeout(() => {
