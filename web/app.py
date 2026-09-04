@@ -711,21 +711,11 @@ def _format_h2h_for_engine(h2h_stats: dict, team_is_home: bool) -> dict:
 
 @app.get("/api/value-bets/{league_code}")
 def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02):
-    """Detecta value bets para todos los partidos próximos de una liga.
-    
-    Escanea próximos partidos, calcula predicción y busca edge vs cuotas de mercado.
-    
-    Args:
-        league_code: Código de la liga
-        bankroll: Bankroll para Kelly stake
-        kelly_frac: Fracción Kelly (0.25 = conservador)
-        min_edge: Edge mínimo para considerar value bet (default 2%)
-    """
+    """Detecta value bets para partidos de una liga (usa fallback a todos los partidos del día)."""
     info = get_league_info(league_code)
     if not info:
         raise HTTPException(404, detail="Liga no encontrada")
 
-    league_api_id = info["api_league_id"]
     config_errors = _validate_api_config()
     if config_errors:
         raise HTTPException(503, detail="API-Football no configurada")
@@ -733,33 +723,54 @@ def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float 
     from collectors.api_football import APIFootballClient
     db = _get_db()
     api = APIFootballClient(db)
+    svc = _get_stats_service()
+
+    # Obtener TODOS los partidos de hoy (fallback como en /api/proximos)
+    from datetime import date
+    today = date.today().strftime("%Y-%m-%d")
+    data = api._request("fixtures", {"date": today, "status": "NS"})
     
-    # Obtener próximos partidos de la liga (próximos 3 días)
-    fixtures = api.get_upcoming_fixtures(league_api_id, limit=50)
+    if not data or data.get("results", 0) == 0:
+        return {
+            "league": info["name"],
+            "league_code": league_code,
+            "value_bets": [],
+            "count": 0,
+            "message": "No hay partidos hoy",
+        }
+
+    # Filtrar partidos donde AMBOS equipos están en nuestro catálogo de esta liga
+    league_teams = set(info["teams"])
+    fixtures = []
+    for fix in data.get("response", []):
+        teams = fix.get("teams", {})
+        fixture_info = fix.get("fixture", {})
+        home_name = teams.get("home", {}).get("name", "")
+        away_name = teams.get("away", {}).get("name", "")
+        if home_name in league_teams and away_name in league_teams:
+            fixtures.append({
+                "date": fixture_info.get("date", ""),
+                "home_team": home_name,
+                "away_team": away_name,
+            })
+
     if not fixtures:
         return {
             "league": info["name"],
             "league_code": league_code,
             "value_bets": [],
             "count": 0,
-            "message": "No hay partidos próximos en esta liga",
+            "message": "No hay partidos de esta liga hoy",
         }
 
     value_bets = []
     
-    for fix in fixtures[:15]:  # Limitar a 15 partidos para no gastar requests
+    for fix in fixtures[:15]:
         home_name = fix["home_team"]
         away_name = fix["away_team"]
         
-        # Verificar que ambos equipos están en nuestro catálogo
-        if home_name not in info["teams"] or away_name not in info["teams"]:
-            continue
-        
-        # Obtener stats de ambos equipos
-        svc = _get_stats_service()
         home_stats = svc.get_team_stats(home_name, league_code)
         away_stats = svc.get_team_stats(away_name, league_code)
-        
         if not home_stats or not away_stats:
             continue
         
@@ -773,7 +784,6 @@ def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float 
                 h2h_stats = _calculate_h2h_stats(h2h_matches, home_name, away_name)
                 h2h_data = _format_h2h_for_engine(h2h_stats, True)
         
-        # Predicción
         home_data = {
             "goals_per_game": home_stats["goals_per_game"],
             "conceded_per_game": home_stats["conceded_per_game"],
@@ -789,9 +799,12 @@ def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float 
         
         prediction = engine.predict(home_data, away_data, h2h_data=h2h_data, bankroll=bankroll, kelly_frac=kelly_frac)
         
-        # Buscar value bets (recomendaciones con edge > min_edge)
         for rec in prediction["recommendations"]:
-            if rec.get("edge") and rec["edge"] >= min_edge and rec.get("odds"):
+            has_odds = rec.get("odds") is not None
+            has_edge = rec.get("edge") is not None and rec["edge"] >= min_edge
+            high_prob = rec["probability"] >= 0.70
+            
+            if (has_odds and has_edge) or (not has_odds and high_prob and rec["recommended"]):
                 value_bets.append({
                     "match": f"{home_name} vs {away_name}",
                     "date": fix["date"],
@@ -799,36 +812,168 @@ def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float 
                     "pick": rec["pick_text"],
                     "probability": rec["probability"],
                     "odds": rec["odds"],
-                    "edge_pct": round(rec["edge"] * 100, 1),
+                    "edge_pct": round(rec["edge"] * 100, 1) if rec.get("edge") else None,
                     "confidence": rec["confidence"],
                     "kelly_stake_pct": rec.get("kelly_stake_pct"),
                     "kelly_stake_units": rec.get("kelly_stake_units"),
                     "expected_goals": prediction["expected_goals"],
+                    "type": "value_bet" if has_odds else "high_prob",
                 })
 
-    # Ordenar por edge descendente
-    value_bets.sort(key=lambda x: x["edge_pct"], reverse=True)
+    # Ordenar: value bets primero (por edge), luego high_prob (por prob)
+    value_bets.sort(key=lambda x: (
+        0 if x["type"] == "value_bet" else 1,
+        -(x["edge_pct"] or 0),
+        -x["probability"]
+    ))
     
     return {
         "league": info["name"],
         "league_code": league_code,
-        "value_bets": value_bets[:20],  # Top 20
+        "value_bets": value_bets[:20],
         "count": len(value_bets),
         "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge},
     }
 
 
 @app.get("/api/mejores-apuestas")
-def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3):
+def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3, demo: bool = False):
     """Mejores value bets del día TODAS las ligas combinadas.
     
-    Agrega value bets de todas las ligas y devuelve el top global.
+    Si demo=true: genera partidos simulados para testing de la UI.
     """
-    from catalog import get_regions, get_leagues_by_region
+    from catalog import get_regions, get_leagues_by_region, get_league_info
+    from datetime import date, timedelta
+    from predictors.recommendations import kelly_fraction
     
-    all_value_bets = []
-    regions = get_regions()
+    # MODO DEMO: datos simulados para testing UI
+    if demo:
+        demo_matches = [
+            {"league": "La Liga (España)", "league_code": "PD", "match": "Real Madrid vs Barcelona", "home": "Real Madrid", "away": "Barcelona"},
+            {"league": "Premier League (Inglaterra)", "league_code": "PL", "match": "Arsenal vs Man City", "home": "Arsenal", "away": "Man City"},
+            {"league": "Serie A (Italia)", "league_code": "SA", "match": "Inter vs Juventus", "home": "Inter", "away": "Juventus"},
+            {"league": "Bundesliga (Alemania)", "league_code": "BL1", "match": "Bayern vs Dortmund", "home": "Bayern", "away": "Dortmund"},
+            {"league": "Ligue 1 (Francia)", "league_code": "FL1", "match": "PSG vs Marseille", "home": "PSG", "away": "Marseille"},
+            {"league": "Liga MX (México)", "league_code": "MEX", "match": "America vs Chivas", "home": "America", "away": "Chivas"},
+            {"league": "Brasileirão (Brasil)", "league_code": "BRA", "match": "Flamengo vs Palmeiras", "home": "Flamengo", "away": "Palmeiras"},
+            {"league": "Liga Profesional (Argentina)", "league_code": "ARG", "match": "River Plate vs Boca Juniors", "home": "River Plate", "away": "Boca Juniors"},
+        ]
+        
+        # Stats demo realistas por equipo
+        demo_stats = {
+            "Real Madrid": {"gpg": 2.3, "cpg": 0.8, "form": "VVVEV", "hw": 0.85},
+            "Barcelona": {"gpg": 2.1, "cpg": 0.9, "form": "VVVED", "hw": 0.78},
+            "Arsenal": {"gpg": 2.2, "cpg": 0.7, "form": "VVVVV", "hw": 0.82},
+            "Man City": {"gpg": 2.5, "cpg": 0.6, "form": "VVVVE", "hw": 0.88},
+            "Inter": {"gpg": 2.0, "cpg": 0.6, "form": "VVVVD", "hw": 0.80},
+            "Juventus": {"gpg": 1.8, "cpg": 0.8, "form": "VVEDD", "hw": 0.72},
+            "Bayern": {"gpg": 2.8, "cpg": 0.9, "form": "VVVVV", "hw": 0.90},
+            "Dortmund": {"gpg": 2.1, "cpg": 1.2, "form": "VVEED", "hw": 0.70},
+            "PSG": {"gpg": 2.6, "cpg": 0.7, "form": "VVVVV", "hw": 0.85},
+            "Marseille": {"gpg": 1.7, "cpg": 1.0, "form": "VVEDD", "hw": 0.68},
+            "America": {"gpg": 1.9, "cpg": 0.9, "form": "VVVED", "hw": 0.75},
+            "Chivas": {"gpg": 1.5, "cpg": 1.1, "form": "VEDDD", "hw": 0.62},
+            "Flamengo": {"gpg": 2.0, "cpg": 0.9, "form": "VVVEE", "hw": 0.78},
+            "Palmeiras": {"gpg": 1.8, "cpg": 0.8, "form": "VVVED", "hw": 0.76},
+            "River Plate": {"gpg": 1.7, "cpg": 0.7, "form": "VVVVE", "hw": 0.80},
+            "Boca Juniors": {"gpg": 1.4, "cpg": 0.8, "form": "VVEDD", "hw": 0.70},
+        }
+        
+        all_value_bets = []
+        svc = _get_stats_service()
+        
+        for i, m in enumerate(demo_matches):
+            home_name = m["home"]
+            away_name = m["away"]
+            
+            h_stats = demo_stats.get(home_name, {"gpg": 1.5, "cpg": 1.3, "form": "EEE", "hw": 0.5})
+            a_stats = demo_stats.get(away_name, {"gpg": 1.5, "cpg": 1.3, "form": "EEE", "hw": 0.5})
+            
+            # Simular odds de mercado (con margen ~5%)
+            import random
+            random.seed(hash(home_name + away_name))  # Determinístico
+            
+            home_data = {
+                "goals_per_game": h_stats["gpg"],
+                "conceded_per_game": h_stats["cpg"],
+                "form": {"avg_score": _form_score(h_stats["form"])},
+                "home_performance": {"win_rate": h_stats["hw"]},
+            }
+            away_data = {
+                "goals_per_game": a_stats["gpg"],
+                "conceded_per_game": a_stats["cpg"],
+                "form": {"avg_score": _form_score(a_stats["form"])},
+                "home_performance": {"win_rate": a_stats["hw"]},
+            }
+            
+            prediction = engine.predict(home_data, away_data, h2h_data=None, bankroll=bankroll, kelly_frac=kelly_frac)
+            
+            # Simular odds: 70% casos "sharp" (edge +), 30% "bookmaker" (edge -)
+            probs = prediction["probabilities"]
+            for rec in prediction["recommendations"]:
+                prob = rec["probability"]
+                if prob < 0.55:
+                    continue
+                
+                fair_odds = 1.0 / prob
+                # Simular: a veces hay value (odds > fair), a veces no
+                import random
+                r = random.random()
+                if r < 0.7:  # 70% value bets simulados
+                    market_odds = round(fair_odds * (1 + random.uniform(0.02, 0.08)), 2)  # +2-8% value
+                else:
+                    market_odds = round(fair_odds * 0.95, 2)  # bookmaker margin -5%
+                
+                edge = prob - (1.0 / market_odds)
+                
+                if edge >= min_edge or prob >= 0.70:
+                    kelly_pct = kelly_fraction(prob, market_odds, kelly_frac)
+                    kelly_units = bankroll * kelly_pct
+                    
+                    all_value_bets.append({
+                        "league": m["league"],
+                        "league_code": m["league_code"],
+                        "match": m["match"],
+                        "date": (date.today() + timedelta(days=random.randint(0, 2))).isoformat() + "T20:00:00",
+                        "market": rec["market"],
+                        "pick": rec["pick_text"],
+                        "probability": round(prob, 3),
+                        "odds": market_odds,
+                        "edge_pct": round(edge * 100, 1),
+                        "confidence": rec["confidence"],
+                        "kelly_stake_pct": round(kelly_pct * 100, 2),
+                        "kelly_stake_units": round(kelly_units, 2),
+                        "expected_goals": prediction["expected_goals"],
+                        "type": "value_bet" if edge >= min_edge else "high_prob",
+                    })
+        
+        # Ordenar: value bets primero (por edge), luego high_prob (por prob)
+        all_value_bets.sort(key=lambda x: (
+            0 if x.get("type") == "value_bet" else 1,
+            -(x["edge_pct"] or 0),
+            -x["probability"]
+        ))
+        
+        # Limitar por liga
+        final_bets = []
+        league_count = {}
+        for bet in all_value_bets:
+            lc = bet["league_code"]
+            if league_count.get(lc, 0) < max_per_league:
+                final_bets.append(bet)
+                league_count[lc] = league_count.get(lc, 0) + 1
+            if len(final_bets) >= 15:
+                break
+        
+        return {
+            "date": date.today().isoformat(),
+            "total_analyzed": len(all_value_bets),
+            "top_bets": final_bets,
+            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge},
+            "demo": True,
+        }
     
+    # MODO REAL: API-Football
     config_errors = _validate_api_config()
     if config_errors:
         raise HTTPException(503, detail="API-Football no configurada")
@@ -836,84 +981,117 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
     from collectors.api_football import APIFootballClient
     db = _get_db()
     api = APIFootballClient(db)
+    svc = _get_stats_service()
     
+    # Obtener TODOS los partidos de hoy (1 solo request)
+    today = date.today().strftime("%Y-%m-%d")
+    data = api._request("fixtures", {"date": today, "status": "NS"})
+    
+    if not data or data.get("results", 0) == 0:
+        return {
+            "date": date.today().isoformat(),
+            "total_analyzed": 0,
+            "top_bets": [],
+            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge},
+            "message": "No hay partidos hoy",
+        }
+    
+    # Construir mapa de todos los equipos de nuestro catálogo por liga
+    all_teams_by_league = {}
+    regions = get_regions()
     for region in regions:
         ligas = get_leagues_by_region(region["key"])
-        for liga in ligas[:5]:  # Top 5 ligas por región para no tardar mucho
-            try:
-                league_code = liga["code"]
-                info = get_league_info(league_code)
-                if not info:
-                    continue
-                
-                fixtures = api.get_upcoming_fixtures(info["api_league_id"], limit=10)
-                if not fixtures:
-                    continue
-                
-                svc = _get_stats_service()
-                
-                for fix in fixtures[:5]:
-                    home_name = fix["home_team"]
-                    away_name = fix["away_team"]
-                    
-                    if home_name not in info["teams"] or away_name not in info["teams"]:
-                        continue
-                    
-                    home_stats = svc.get_team_stats(home_name, league_code)
-                    away_stats = svc.get_team_stats(away_name, league_code)
-                    if not home_stats or not away_stats:
-                        continue
-                    
-                    # H2H rápido
-                    h2h_data = None
-                    team_a_row = db.query_one("SELECT id FROM teams WHERE name = ? AND league = ?", (home_name, league_code))
-                    team_b_row = db.query_one("SELECT id FROM teams WHERE name = ? AND league = ?", (away_name, league_code))
-                    if team_a_row and team_b_row:
-                        h2h_matches = db.get_h2h(team_a_row["id"], team_b_row["id"], limit=10)
-                        if h2h_matches:
-                            h2h_stats = _calculate_h2h_stats(h2h_matches, home_name, away_name)
-                            h2h_data = _format_h2h_for_engine(h2h_stats, True)
-                    
-                    home_data = {
-                        "goals_per_game": home_stats["goals_per_game"],
-                        "conceded_per_game": home_stats["conceded_per_game"],
-                        "form": {"avg_score": _form_score(home_stats["form"])},
-                        "home_performance": {"win_rate": home_stats["home_wr"]},
-                    }
-                    away_data = {
-                        "goals_per_game": away_stats["goals_per_game"],
-                        "conceded_per_game": away_stats["conceded_per_game"],
-                        "form": {"avg_score": _form_score(away_stats.get("form", "EEE"))},
-                        "home_performance": {"win_rate": away_stats.get("home_wr", 0.5)},
-                    }
-                    
-                    prediction = engine.predict(home_data, away_data, h2h_data=h2h_data, bankroll=bankroll, kelly_frac=kelly_frac)
-                    
-                    for rec in prediction["recommendations"]:
-                        if rec.get("edge") and rec["edge"] >= min_edge and rec.get("odds"):
-                            all_value_bets.append({
-                                "league": info["name"],
-                                "league_code": league_code,
-                                "match": f"{home_name} vs {away_name}",
-                                "date": fix["date"],
-                                "market": rec["market"],
-                                "pick": rec["pick_text"],
-                                "probability": rec["probability"],
-                                "odds": rec["odds"],
-                                "edge_pct": round(rec["edge"] * 100, 1),
-                                "confidence": rec["confidence"],
-                                "kelly_stake_pct": rec.get("kelly_stake_pct"),
-                                "kelly_stake_units": rec.get("kelly_stake_units"),
-                                "expected_goals": prediction["expected_goals"],
-                            })
-            except Exception as e:
-                logger.warning(f"Error procesando {liga['code']}: {e}")
-                continue
+        for liga in ligas:
+            info = get_league_info(liga["code"])
+            if info:
+                all_teams_by_league[liga["code"]] = {
+                    "name": info["name"],
+                    "teams": set(info["teams"]),
+                }
     
-    # Ordenar global por edge
-    all_value_bets.sort(key=lambda x: x["edge_pct"], reverse=True)
+    all_value_bets = []
     
-    # Limitar por liga (máximo N por liga)
+    # Procesar cada partido del día
+    for fix in data.get("response", [])[:50]:
+        teams = fix.get("teams", {})
+        fixture_info = fix.get("fixture", {})
+        league_info_api = fix.get("league", {})
+        
+        home_name = teams.get("home", {}).get("name", "")
+        away_name = teams.get("away", {}).get("name", "")
+        
+        if not home_name or not away_name:
+            continue
+        
+        matched_league_code = None
+        matched_league_info = None
+        for lcode, linf in all_teams_by_league.items():
+            if home_name in linf["teams"] and away_name in linf["teams"]:
+                matched_league_code = lcode
+                matched_league_info = linf
+                break
+        
+        if not matched_league_code:
+            continue
+        
+        home_stats = svc.get_team_stats(home_name, matched_league_code)
+        away_stats = svc.get_team_stats(away_name, matched_league_code)
+        if not home_stats or not away_stats:
+            continue
+        
+        h2h_data = None
+        team_a_row = db.query_one("SELECT id FROM teams WHERE name = ? AND league = ?", (home_name, matched_league_code))
+        team_b_row = db.query_one("SELECT id FROM teams WHERE name = ? AND league = ?", (away_name, matched_league_code))
+        if team_a_row and team_b_row:
+            h2h_matches = db.get_h2h(team_a_row["id"], team_b_row["id"], limit=10)
+            if h2h_matches:
+                h2h_stats = _calculate_h2h_stats(h2h_matches, home_name, away_name)
+                h2h_data = _format_h2h_for_engine(h2h_stats, True)
+        
+        home_data = {
+            "goals_per_game": home_stats["goals_per_game"],
+            "conceded_per_game": home_stats["conceded_per_game"],
+            "form": {"avg_score": _form_score(home_stats["form"])},
+            "home_performance": {"win_rate": home_stats["home_wr"]},
+        }
+        away_data = {
+            "goals_per_game": away_stats["goals_per_game"],
+            "conceded_per_game": away_stats["conceded_per_game"],
+            "form": {"avg_score": _form_score(away_stats.get("form", "EEE"))},
+            "home_performance": {"win_rate": away_stats.get("home_wr", 0.5)},
+        }
+        
+        prediction = engine.predict(home_data, away_data, h2h_data=h2h_data, bankroll=bankroll, kelly_frac=kelly_frac)
+        
+        for rec in prediction["recommendations"]:
+            has_odds = rec.get("odds") is not None
+            has_edge = rec.get("edge") is not None and rec["edge"] >= min_edge
+            high_prob = rec["probability"] >= 0.70
+            
+            if (has_odds and has_edge) or (not has_odds and high_prob and rec["recommended"]):
+                all_value_bets.append({
+                    "league": matched_league_info["name"],
+                    "league_code": matched_league_code,
+                    "match": f"{home_name} vs {away_name}",
+                    "date": fixture_info.get("date", ""),
+                    "market": rec["market"],
+                    "pick": rec["pick_text"],
+                    "probability": rec["probability"],
+                    "odds": rec["odds"],
+                    "edge_pct": round(rec["edge"] * 100, 1) if rec.get("edge") else None,
+                    "confidence": rec["confidence"],
+                    "kelly_stake_pct": rec.get("kelly_stake_pct"),
+                    "kelly_stake_units": rec.get("kelly_stake_units"),
+                    "expected_goals": prediction["expected_goals"],
+                    "type": "value_bet" if has_odds else "high_prob",
+                })
+    
+    all_value_bets.sort(key=lambda x: (
+        0 if x.get("type") == "value_bet" else 1,
+        -(x["edge_pct"] or 0),
+        -x["probability"]
+    ))
+    
     final_bets = []
     league_count = {}
     for bet in all_value_bets:
@@ -925,7 +1103,7 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             break
     
     return {
-        "date": __import__("datetime").date.today().isoformat(),
+        "date": date.today().isoformat(),
         "total_analyzed": len(all_value_bets),
         "top_bets": final_bets,
         "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge},

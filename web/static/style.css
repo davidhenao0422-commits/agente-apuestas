@@ -543,6 +543,38 @@ main { flex: 1; padding: 30px 0 50px; }
   margin-top: 4px;
 }
 
+/* Checkbox label for demo mode */
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px !important;
+  color: var(--text) !important;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+.checkbox-label:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.checkbox-label span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.checkbox-label i { color: var(--accent); }
+
 /* Mejores Apuestas del Día */
 .mejores-summary {
   display: flex;

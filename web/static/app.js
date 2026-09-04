@@ -464,6 +464,7 @@ async function cargarMejoresApuestas() {
   estado.bankroll = parseFloat($('#bankroll-input-global').value) || 1000;
   estado.kellyFrac = parseFloat($('#kelly-frac-select-global').value) || 0.25;
   estado.minEdge = parseFloat($('#min-edge-select-global').value) || 0.02;
+  const demoMode = $('#demo-mode-global').checked;
   
   try {
     const params = new URLSearchParams({
@@ -471,6 +472,7 @@ async function cargarMejoresApuestas() {
       kelly_frac: estado.kellyFrac,
       min_edge: estado.minEdge,
       max_per_league: 3,
+      demo: demoMode,
     });
     
     const data = await fetchJson(`/api/mejores-apuestas?${params.toString()}`);
