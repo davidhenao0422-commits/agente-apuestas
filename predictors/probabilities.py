@@ -18,8 +18,20 @@ def calculate_market_probabilities(lambda_home: float, lambda_away: float) -> Di
     )
 
     scores = predict_match_scores(lambda_home, lambda_away)
-    ou = over_under_probabilities(lambda_home, lambda_away)
     btts = btts_probability(lambda_home, lambda_away)
+
+    # Calcular Over/Under para múltiples líneas
+    def calc_ou(line):
+        over = 0.0
+        for h in range(13):
+            for a in range(13):
+                if h + a > line:
+                    over += poisson_probability(lambda_home, h) * poisson_probability(lambda_away, a)
+        return {"over": over, "under": 1.0 - over}
+
+    ou_1_5 = calc_ou(1.5)
+    ou_2_5 = calc_ou(2.5)
+    ou_3_5 = calc_ou(3.5)
 
     home_clean_sheet = sum(
         poisson_probability(lambda_home, h) * poisson_probability(lambda_away, 0)
@@ -30,13 +42,33 @@ def calculate_market_probabilities(lambda_home: float, lambda_away: float) -> Di
         for a in range(8)
     )
 
+    # Doble Oportunidad
+    double_chance_1x = scores["home_win"] + scores["draw"]
+    double_chance_x2 = scores["draw"] + scores["away_win"]
+    double_chance_12 = scores["home_win"] + scores["away_win"]
+
+    # Over/Under adicionales
+    over_1_5 = ou_1_5.get("over", 0)
+    under_1_5 = ou_1_5.get("under", 0)
+    over_2_5 = ou_2_5.get("over", 0)
+    under_2_5 = ou_2_5.get("under", 0)
+    over_3_5 = ou_3_5.get("over", 0)
+    under_3_5 = ou_3_5.get("under", 0)
+
     return {
         "1": scores["home_win"],
         "draw": scores["draw"],
         "2": scores["away_win"],
-        "over_2.5": ou["over"],
-        "under_2.5": ou["under"],
+        "over_1_5": over_1_5,
+        "under_1_5": under_1_5,
+        "over_2.5": over_2_5,
+        "under_2.5": under_2_5,
+        "over_3_5": over_3_5,
+        "under_3_5": under_3_5,
         "btts_yes": btts,
+        "double_chance_1x": double_chance_1x,
+        "double_chance_x2": double_chance_x2,
+        "double_chance_12": double_chance_12,
         "home_clean_sheet": home_clean_sheet,
         "away_clean_sheet": away_clean_sheet,
     }

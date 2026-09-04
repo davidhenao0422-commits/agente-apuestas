@@ -1,5 +1,5 @@
 // Aplicación web del Agente de Apuestas Deportivas
-// Flujo: Inicio → Regiones/Ligas → Equipos → Recomendación
+// Flujo: Inicio → Regiones/Ligas → Equipos → Recomendación → Próximos
 
 let estado = {
   regionActual: null,
@@ -37,10 +37,16 @@ function goHome() {
   estado.regionActual = null;
   estado.ligaActual = null;
   mostrar('#view-home');
+  $('#nav-inicio').classList.add('active');
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.remove('active');
 }
 
 async function goRegiones() {
   mostrar('#view-regiones');
+  $('#nav-inicio').classList.remove('active');
+  $('#nav-ligas').classList.add('active');
+  $('#nav-proximos').classList.remove('active');
   await cargarRegiones();
 }
 
@@ -49,16 +55,12 @@ async function goEquipos() {
   await cargarEquipos();
 }
 
-function navInicio() {
-  $('#nav-ligas').classList.remove('active');
-  $('#nav-inicio').classList.add('active');
-  goHome();
-}
-
-function navLigas() {
+async function goProximos() {
+  mostrar('#view-proximos');
   $('#nav-inicio').classList.remove('active');
-  $('#nav-ligas').classList.add('active');
-  goRegiones();
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.add('active');
+  await cargarProximosPartidos();
 }
 
 // ---- Carga de regiones/ligas ----
@@ -68,15 +70,13 @@ async function cargarRegiones() {
   try {
     const regiones = await fetchJson('/api/regiones');
     let html = '';
-
     for (const region of regiones) {
       html += `<div class="region-block">
-        <h3 class="region-title">🌍 ${region.label}</h3>
+        <h3 class="region-title"><i class="fas fa-globe-americas"></i> ${region.label}</h3>
         <div class="league-grid" id="league-${region.key}">
           <div class="empty">Cargando...</div>
         </div>
       </div>`;
-
       cont.innerHTML = html;
       cargarLigasDeRegion(region.key, `#league-${region.key}`);
     }
@@ -166,13 +166,11 @@ async function cargarRecomendaciones(leagueCode, teamName) {
   try {
     const data = await fetchJson(`/api/recomendaciones/${leagueCode}/${encodeURIComponent(teamName)}`);
 
-    // Nota de fuente de datos
     const fuente = data.stats && data.stats.data_source === 'real'
-      ? '✅ Datos reales (API-Football)'
-      : 'ℹ️ Datos preseleccionados (referencia). Usa "Actualizar" para datos reales.';
+      ? '<i class="fas fa-check-circle"></i> Datos reales (API-Football)'
+      : '<i class="fas fa-info-circle"></i> Datos preseleccionados. Usa "Actualizar" para datos reales.';
     recoDiv.innerHTML = `<div class="notice">${fuente}</div>`;
 
-    // Stats
     const s = data.stats;
     const statsItems = [
       ['Rival de referencia', data.rival || '—'],
@@ -190,35 +188,32 @@ async function cargarRecomendaciones(leagueCode, teamName) {
       `<div class="stat-item"><div class="label">${l}</div><div class="value">${v}</div></div>`
     ).join('');
 
-    // Goles esperados
     const eg = data.expected_goals;
     expDiv.innerHTML = `
-      <div class="expected-line">⚽ Goles esperados (Poisson): 
+      <div class="expected-line"><i class="fas fa-futbol"></i> Goles esperados (Poisson): 
         <strong>${eg.home}</strong> - <strong>${eg.away}</strong> 
         (total <strong>${eg.total}</strong>)
       </div>
     `;
 
-    // Probabilidades
     const p = data.probabilities;
     expDiv.innerHTML += `
       <div class="expected-line" style="margin-top:8px;font-size:14px;color:var(--muted)">
-        📈 Local ${(p['1']*100).toFixed(0)}% | Empate ${(p['draw']*100).toFixed(0)}% | 
+        <i class="fas fa-chart-pie"></i> Local ${(p['1']*100).toFixed(0)}% | Empate ${(p['draw']*100).toFixed(0)}% | 
         Visitante ${(p['2']*100).toFixed(0)}% · Over2.5 ${(p['over_2.5']*100).toFixed(0)}% · 
         BTTS ${(p['btts_yes']*100).toFixed(0)}%
       </div>
     `;
 
-    // Recomendaciones
     const recs = data.recommendations;
     if (!recs.length) {
-      recoDiv.innerHTML = '<div class="empty">No hay recomendaciones suficientes.</div>';
+      recoDiv.innerHTML += '<div class="empty">No hay recomendaciones suficientes.</div>';
       return;
     }
 
     const mejor = data.mejor_opcion ? data.mejor_opcion.pick_text : null;
 
-    recoDiv.innerHTML = recs.map(rec => {
+    recoDiv.innerHTML += recs.map(rec => {
       const esLaMejor = mejor && rec.pick_text === mejor;
       const badge = esLaMejor
         ? 'badge-alta'
@@ -227,7 +222,7 @@ async function cargarRecomendaciones(leagueCode, teamName) {
             : 'badge-no');
       const check = esLaMejor ? '★' : (rec.recommended ? '✓' : '—');
       let meta = `Probabilidad ${(rec.probability*100).toFixed(0)}% · ${rec.confidence}`;
-      if (esLaMejor) meta += ' · Opción destacada';
+      if (esLaMejor) meta += ' · <strong>Opción destacada</strong>';
       if (rec.edge !== null && rec.edge !== undefined) meta += ` · Edge ${(rec.edge*100).toFixed(1)}%`;
       return `<div class="recomm-item">
         <div class="recomm-badge ${badge}">${check}</div>
@@ -244,35 +239,81 @@ async function cargarRecomendaciones(leagueCode, teamName) {
   }
 }
 
+// ---- Próximos partidos ----
+async function cargarProximosPartidos() {
+  const cont = $('#proximos-ligas-container');
+  cont.innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i> Cargando ligas...</div>';
+
+  try {
+    const regiones = await fetchJson('/api/regiones');
+    let html = '';
+
+    for (const region of regiones) {
+      const ligas = await fetchJson(`/api/ligas/${region.key}`);
+      for (const liga of ligas) {
+        try {
+          const data = await fetchJson(`/api/proximos/${liga.code}`);
+          if (data.fixtures && data.fixtures.length > 0) {
+            html += `<div class="card">
+              <h3 class="card-title"><i class="fas fa-trophy"></i> ${data.league}</h3>
+              <div class="fixtures-list">`;
+            data.fixtures.forEach(f => {
+              const date = new Date(f.date);
+              const dateStr = date.toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
+              const timeStr = date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+              html += `<div class="fixture-card">
+                <div class="fixture-teams">
+                  <span>${f.home_team}</span>
+                  <span class="fixture-vs">vs</span>
+                  <span>${f.away_team}</span>
+                </div>
+                <div class="fixture-date">${dateStr} ${timeStr}</div>
+              </div>`;
+            });
+            html += '</div></div>';
+          }
+        } catch (e) {
+          // Ignorar errores de ligas sin API
+        }
+      }
+    }
+
+    cont.innerHTML = html || '<div class="empty">No hay partidos próximos disponibles.</div>';
+  } catch (e) {
+    cont.innerHTML = `<div class="empty">⚠️ ${e.message}</div>`;
+  }
+}
+
 // ---- Actualizar ----
 async function actualizarDatos(leagueCode) {
   const refresh = $('#actualizar-btn');
   refresh.disabled = true;
-  refresh.textContent = '⏳ Actualizando...';
+  refresh.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Actualizando...';
   const statusDiv = $('#actualizar-status');
   if (statusDiv) statusDiv.innerHTML = '';
   try {
     const data = await fetchJson(`/api/actualizar/${leagueCode}`, { method: 'POST' });
-    refresh.textContent = '✅ Listo';
+    refresh.innerHTML = '<i class="fas fa-check"></i> Listo';
     if (statusDiv) {
       const msg = data.message || 'Completado';
-      const extra = data.requests_used ? ` (requests usados: ${data.requests_used}/${data.daily_limit})` : '';
-      statusDiv.innerHTML = `<div class="notice">${msg}${extra}</div>`;
+      const extra = data.requests_used ? ` (requests: ${data.requests_used}/${data.daily_limit})` : '';
+      statusDiv.innerHTML = `<div class="notice"><i class="fas fa-info-circle"></i> ${msg}${extra}</div>`;
     }
     await cargarEquipos();
   } catch (e) {
-    refresh.textContent = '⚠️ Reintentar';
+    refresh.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Reintentar';
     if (statusDiv) statusDiv.innerHTML = `<div class="notice">${e.message}</div>`;
   } finally {
     setTimeout(() => {
       refresh.disabled = false;
-      refresh.textContent = '🔄 Actualizar datos';
+      refresh.innerHTML = '<i class="fas fa-sync"></i> Actualizar datos';
     }, 2500);
   }
 }
 
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', () => {
-  $('#nav-ligas').addEventListener('click', navLigas);
-  $('#nav-inicio').addEventListener('click', navInicio);
+  $('#nav-inicio').addEventListener('click', goHome);
+  $('#nav-ligas').addEventListener('click', goRegiones);
+  $('#nav-proximos').addEventListener('click', goProximos);
 });

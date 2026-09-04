@@ -6,15 +6,17 @@
   <title>Agente de Apuestas Deportivas</title>
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="container topbar-inner">
-      <span class="logo">🎯 Agente de Apuestas</span>
+      <span class="logo"><i class="fas fa-futbol"></i> Agente de Apuestas</span>
       <nav>
-        <button class="nav-btn active" id="nav-ligas">Ligas</button>
-        <button class="nav-btn" id="nav-inicio">Inicio</button>
+        <button class="nav-btn active" id="nav-inicio"><i class="fas fa-home"></i> Inicio</button>
+        <button class="nav-btn" id="nav-ligas"><i class="fas fa-trophy"></i> Ligas</button>
+        <button class="nav-btn" id="nav-proximos"><i class="fas fa-calendar"></i> Próximos</button>
       </nav>
     </div>
   </header>
@@ -23,30 +25,36 @@
     <!-- Vista inicio -->
     <section id="view-home" class="view">
       <div class="hero">
-        <h1>Recomendaciones de apuestas basadas en datos</h1>
+        <div class="hero-badge">⚡ Datos en tiempo real</div>
+        <h1>Recomendaciones de apuestas <span class="gradient-text">basadas en datos</span></h1>
         <p class="subtitle">
           Selecciona una liga de Europa, Latinoamérica o Centroamérica, elige un
           equipo y obtén apuestas recomendadas a partir de sus estadísticas.
         </p>
         <div class="hero-actions">
-          <button class="btn btn-primary" onclick="goRegiones()">Ver ligas disponibles</button>
+          <button class="btn btn-primary btn-lg" onclick="goRegiones()">
+            <i class="fas fa-trophy"></i> Ver ligas disponibles
+          </button>
+          <button class="btn btn-secondary btn-lg" onclick="goProximos()">
+            <i class="fas fa-calendar"></i> Próximos partidos
+          </button>
         </div>
       </div>
       <div class="features">
         <div class="feature-card" onclick="goRegiones()">
-          <div class="feature-icon">🌍</div>
+          <div class="feature-icon"><i class="fas fa-globe-americas"></i></div>
           <h3>Ligas de 3 regiones</h3>
           <p>Europa, Latinoamérica y Centroamérica con los equipos principales precargados.</p>
         </div>
         <div class="feature-card" onclick="goRegiones()">
-          <div class="feature-icon">📊</div>
+          <div class="feature-icon"><i class="fas fa-chart-line"></i></div>
           <h3>Estadísticas claras</h3>
           <p>Posición, goles, forma reciente, tiros y posesión de cada equipo.</p>
         </div>
         <div class="feature-card" onclick="goRegiones()">
-          <div class="feature-icon">🎯</div>
+          <div class="feature-icon"><i class="fas fa-bullseye"></i></div>
           <h3>Recomendaciones priorizadas</h3>
-          <p>Apuestas ordenadas por confianza con su razonamiento.</p>
+          <p>15+ mercados de apuestas ordenados por confianza y valor.</p>
         </div>
       </div>
     </section>
@@ -54,7 +62,7 @@
     <!-- Vista regiones/ligas -->
     <section id="view-regiones" class="view hidden">
       <div class="page-head">
-        <button class="back-btn" onclick="goHome()">← Inicio</button>
+        <button class="back-btn" onclick="goHome()"><i class="fas fa-arrow-left"></i> Inicio</button>
         <h2>Selecciona una liga</h2>
       </div>
       <div id="regions-container"></div>
@@ -63,10 +71,10 @@
     <!-- Vista equipos -->
     <section id="view-equipos" class="view hidden">
       <div class="page-head">
-        <button class="back-btn" onclick="goRegiones()">← Ligas</button>
+        <button class="back-btn" onclick="goRegiones()"><i class="fas fa-arrow-left"></i> Ligas</button>
         <h2 id="equipos-title">Equipos</h2>
       </div>
-      <button class="btn btn-ghost refresh-btn" id="actualizar-btn">🔄 Actualizar datos</button>
+      <button class="btn btn-ghost refresh-btn" id="actualizar-btn"><i class="fas fa-sync"></i> Actualizar datos</button>
       <div id="actualizar-status"></div>
       <div id="equipos-container"></div>
     </section>
@@ -74,17 +82,17 @@
     <!-- Vista recomendación -->
     <section id="view-recomendacion" class="view hidden">
       <div class="page-head">
-        <button class="back-btn" onclick="goEquipos()">← Equipos</button>
+        <button class="back-btn" onclick="goEquipos()"><i class="fas fa-arrow-left"></i> Equipos</button>
         <h2 id="recom-titulo">Recomendaciones</h2>
       </div>
 
       <div class="card stats-card" id="stats-card">
-        <h3 class="card-title">📊 Estadísticas del equipo</h3>
+        <h3 class="card-title"><i class="fas fa-chart-bar"></i> Estadísticas del equipo</h3>
         <div id="stats-detail" class="stats-grid"></div>
       </div>
 
       <div class="card recomm-card">
-        <h3 class="card-title">🎯 Apuestas recomendadas</h3>
+        <h3 class="card-title"><i class="fas fa-bullseye"></i> Apuestas recomendadas</h3>
         <div id="recommendations-list"></div>
       </div>
 
@@ -92,11 +100,20 @@
         <div id="expected-detail"></div>
       </div>
     </section>
+
+    <!-- Vista próximos partidos -->
+    <section id="view-proximos" class="view hidden">
+      <div class="page-head">
+        <button class="back-btn" onclick="goHome()"><i class="fas fa-arrow-left"></i> Inicio</button>
+        <h2><i class="fas fa-calendar"></i> Próximos partidos</h2>
+      </div>
+      <div id="proximos-ligas-container"></div>
+    </section>
   </main>
 
   <footer class="footer">
     <div class="container">
-      <p>⚠️ Las recomendaciones son estadísticas y no garantizan resultados. Las apuestas conllevan riesgo.</p>
+      <p><i class="fas fa-exclamation-triangle"></i> Las recomendaciones son estadísticas y no garantizan resultados. Las apuestas conllevan riesgo.</p>
     </div>
   </footer>
 

@@ -328,6 +328,32 @@ class APIFootballClient:
                     }
         return result
 
+    def get_upcoming_fixtures(self, league_api_id: int, limit: int = 10) -> list:
+        """Obtiene los próximos partidos de una liga.
+
+        Retorna lista de dicts con:
+            'date', 'home_team', 'away_team', 'home_logo', 'away_logo'
+        """
+        data = self._request(
+            "fixtures",
+            {"league": league_api_id, "season": "2024", "next": limit, "status": "NS"}
+        )
+        if not data or data.get("results", 0) == 0:
+            return []
+
+        fixtures = []
+        for fix in data.get("response", []):
+            teams = fix.get("teams", {})
+            fixture_info = fix.get("fixture", {})
+            fixtures.append({
+                "date": fixture_info.get("date", ""),
+                "home_team": teams.get("home", {}).get("name", ""),
+                "away_team": teams.get("away", {}).get("name", ""),
+                "home_logo": teams.get("home", {}).get("logo", ""),
+                "away_logo": teams.get("away", {}).get("logo", ""),
+            })
+        return fixtures
+
 
 def db_team_id_for(name_a: str, name_b: str, candidate: str,
                    db: Database) -> Optional[int]:

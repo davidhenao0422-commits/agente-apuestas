@@ -208,6 +208,37 @@ def equipo_stats(league_code: str, team_name: str):
     }
 
 
+@app.get("/api/proximos/{league_code}")
+def proximos_partidos(league_code: str):
+    """Obtiene los próximos partidos de una liga desde API-Football."""
+    info = get_league_info(league_code)
+    if not info:
+        raise HTTPException(404, detail="Liga no encontrada")
+
+    config_errors = _validate_api_config()
+    if config_errors:
+        raise HTTPException(503, detail={
+            "action": "sin_api_config",
+            "message": "Se requiere API_FOOTBALL_KEY para obtener partidos próximos.",
+            "errors": config_errors,
+        })
+
+    from collectors.api_football import APIFootballClient
+
+    db = _get_db()
+    api = APIFootballClient(db)
+    league_api_id = info["api_league_id"]
+
+    fixtures = api.get_upcoming_fixtures(league_api_id, limit=10)
+
+    return {
+        "league": info["name"],
+        "league_code": league_code,
+        "fixtures": fixtures,
+        "count": len(fixtures),
+    }
+
+
 @app.post("/api/actualizar/{league_code}")
 def actualizar(league_code: str):
     """Actualiza datos reales de la liga desde API-Football usando standings.
