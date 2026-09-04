@@ -1,0 +1,16 @@
+# Configuración de despliegue para Render (plan free)
+# Crear un Web Service apuntando a este repo.
+services:
+  - type: web
+    name: agente-apuestas
+    runtime: python
+    plan: free
+    healthCheckPath: /api/regiones
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: BOT_LANGUAGE
+        value: es
+      - key: DEFAULT_MARKETS
+        value: 1X2,BTS,OVER_UNDER

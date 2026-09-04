@@ -1,0 +1,121 @@
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --card-border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --primary: #238636;
+  --primary-hover: #2ea043;
+  --primary-bg: rgba(35, 134, 54, 0.15);
+  --accent: #f0883e;
+  --danger: #f85149;
+  --radius: 12px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.container { width: 100%; max-width: 960px; margin: 0 auto; padding: 0 16px; }
+
+/* Topbar */
+.topbar { background: var(--card); border-bottom: 1px solid var(--card-border); position: sticky; top: 0; z-index: 10; }
+.topbar-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+.logo { font-weight: 800; font-size: 18px; }
+nav .nav-btn { background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; padding: 8px 12px; border-radius: 6px; }
+nav .nav-btn.active, nav .nav-btn:hover { color: var(--text); background: var(--primary-bg); }
+
+/* Main */
+main { flex: 1; padding: 24px 0 40px; }
+
+.view { animation: fade .2s ease; }
+.hidden { display: none !important; }
+@keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* Hero */
+.hero { text-align: center; padding: 40px 0 30px; }
+.hero h1 { font-size: clamp(24px, 4vw, 36px); font-weight: 800; margin-bottom: 12px; }
+.hero .subtitle { color: var(--muted); max-width: 620px; margin: 0 auto 24px; font-size: 16px; }
+.hero-actions { margin-bottom: 10px; }
+
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.feature-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 24px; cursor: pointer; transition: transform .15s, border-color .15s; }
+.feature-card:hover { transform: translateY(-3px); border-color: var(--primary); }
+.feature-icon { font-size: 32px; margin-bottom: 10px; }
+.feature-card h3 { font-size: 18px; margin-bottom: 6px; }
+.feature-card p { color: var(--muted); font-size: 14px; }
+
+/* Buttons */
+.btn { border: none; border-radius: 8px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .15s; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn-ghost:hover { background: rgba(240, 136, 62, 0.1); }
+
+.back-btn { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 14px; margin-right: 16px; }
+
+.page-head { display: flex; align-items: center; margin-bottom: 24px; }
+.page-head h2 { font-size: 24px; font-weight: 700; }
+
+.refresh-btn { margin-bottom: 16px; }
+
+/* Regiones */
+.region-block { margin-bottom: 24px; }
+.region-title { font-size: 20px; font-weight: 700; margin-bottom: 12px; color: var(--accent); }
+.league-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.league-card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 16px; cursor: pointer; transition: border-color .15s, transform .15s; }
+.league-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+.league-card h4 { font-size: 16px; font-weight: 600; }
+.league-card span { font-size: 13px; color: var(--muted); }
+
+/* Equipos tabla */
+.teams-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.teams-table th, .teams-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--card-border); }
+.teams-table th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.teams-table tr { cursor: pointer; }
+.teams-table tr:hover td { background: var(--primary-bg); }
+.team-name { font-weight: 600; }
+
+/* Cards */
+.card { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
+.card-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat-item { background: var(--bg); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px; }
+.stat-item .label { font-size: 12px; color: var(--muted); }
+.stat-item .value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+
+/* Recommendations */
+.recomm-item { display: flex; align-items: flex-start; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--card-border); }
+.recomm-item:last-child { border-bottom: none; }
+.recomm-badge { flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; }
+.badge-alta { background: var(--primary-bg); color: var(--primary); }
+.badge-media { background: rgba(240, 136, 62, 0.15); color: var(--accent); }
+.badge-baja { background: rgba(139, 148, 158, 0.15); color: var(--muted); }
+.badge-no { background: rgba(248, 81, 73, 0.15); color: var(--danger); }
+.recomm-body { flex: 1; }
+.recomm-body .title { font-weight: 600; }
+.recomm-body .meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+.expected-card .expected-line { font-size: 15px; color: var(--text); }
+
+/* Footer */
+.footer { background: var(--card); border-top: 1px solid var(--card-border); padding: 14px 0; text-align: center; font-size: 13px; color: var(--muted); }
+
+.empty { text-align: center; color: var(--muted); padding: 40px 0; }
+
+.notice { background: rgba(240, 136, 62, 0.1); border: 1px solid rgba(240, 136, 62, 0.4); color: var(--accent); padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+
+@media (max-width: 600px) {
+  .league-grid { grid-template-columns: 1fr 1fr; }
+  .stats-grid { grid-template-columns: 1fr 1fr; }
+  .teams-table { font-size: 13px; }
+}

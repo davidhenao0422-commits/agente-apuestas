@@ -1,0 +1,27 @@
+# Entorno y secretos
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Base de datos local
+*.db
+*.sqlite3
+
+# Caché
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Despliegue
+_build/
+dist/
