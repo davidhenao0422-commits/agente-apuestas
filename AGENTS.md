@@ -11,6 +11,18 @@ Aplicación web y bot de Telegram que genera **recomendaciones de apuestas basad
 - 🔄 Integración con API-Football para datos en tiempo real
 - 🌐 Aplicación web responsive (accesible desde cualquier navegador)
 - 🤖 Bot de Telegram (funcional, complementario a la web)
+- ☁️ Desplegada en Render Free (24/7, gratis para siempre)
+
+---
+
+## Estado del Despliegue
+
+- **URL:** https://agente-apuestas.onrender.com
+- **Hosting:** Render Free ($0 para siempre)
+- **GitHub:** https://github.com/davidhenao0422-commits/agente-apuestas
+- **API Key:** aa60ccff49a0ae41375c0cb6246e317d
+- **Fecha:** 2026-09-04
+- **Estado:** ✅ En línea
 
 ---
 
@@ -271,7 +283,6 @@ CREATE TABLE team_stats (
     shots_on_target INTEGER DEFAULT 0,
     corners INTEGER DEFAULT 0,
     possession_avg REAL DEFAULT 0,
-    -- Stats local/visitante
     home_won INTEGER DEFAULT 0,
     home_drawn INTEGER DEFAULT 0,
     home_lost INTEGER DEFAULT 0,
@@ -386,16 +397,10 @@ python -m pytest tests/ -v
 # Verificar compilación
 python -m compileall -q web catalog collectors analyzers predictors bot storage
 
-# Ver logs del servidor (Oracle Cloud)
-sudo journalctl -u agente-apuestas -f
-
-# Reiniciar servicio (Oracle Cloud)
-sudo systemctl restart agente-apuestas
-
-# Actualizar código (Oracle Cloud)
-cd /home/ubuntu/agente-apuestas
-git pull
-sudo systemctl restart agente-apuestas
+# Actualizar código (después de cambios)
+git add -A
+git commit -m "Tu mensaje"
+git push origin main
 ```
 
 ---
