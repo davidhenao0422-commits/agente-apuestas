@@ -7,6 +7,8 @@ let estado = {
   ligaNombre: '',
   equipos: [],
   equipoActual: null,
+  rivalActual: null,
+  equipoEsLocal: true,
 };
 
 // ---- Utilidades ----
@@ -147,9 +149,11 @@ async function cargarEquipos() {
   }
 }
 
-async function elegirEquipo(encName) {
+function elegirEquipo(encName) {
   const name = decodeURIComponent(encName);
   estado.equipoActual = name;
+  estado.rivalActual = null; // Resetear rival al cambiar de equipo
+  estado.equipoEsLocal = true; // Default a local
   mostrar('#view-recomendacion');
   $('#recom-titulo').textContent = `${name} — ${estado.ligaNombre}`;
   await cargarRecomendaciones(estado.ligaActual, name);
@@ -163,17 +167,61 @@ async function cargarRecomendaciones(leagueCode, teamName) {
   recoDiv.innerHTML = '';
   expDiv.innerHTML = '';
 
+  // Construir URL con parámetros opcionales
+  let url = `/api/recomendaciones/${leagueCode}/${encodeURIComponent(teamName)}`;
+  const params = new URLSearchParams();
+  if (estado.rivalActual) params.set('rival', estado.rivalActual);
+  params.set('is_home', estado.equipoEsLocal);
+  url += '?' + params.toString();
+
   try {
-    const data = await fetchJson(`/api/recomendaciones/${leagueCode}/${encodeURIComponent(teamName)}`);
+    const data = await fetchJson(url);
 
     const fuente = data.stats && data.stats.data_source === 'real'
       ? '<i class="fas fa-check-circle"></i> Datos reales (API-Football)'
       : '<i class="fas fa-info-circle"></i> Datos preseleccionados. Usa "Actualizar" para datos reales.';
-    recoDiv.innerHTML = `<div class="notice">${fuente}</div>`;
+    
+    // Construir selector de rival
+    const rivalesDisponibles = estado.equipos
+      .filter(e => e.name !== teamName)
+      .map(e => e.name);
+    
+    let rivalSelectorHtml = `
+      <div class="rival-selector">
+        <label><i class="fas fa-users"></i> Rival:</label>
+        <select id="rival-select" onchange="cambiarRival(this.value)">
+          <option value="">-- Seleccionar rival --</option>
+          ${rivalesDisponibles.map(r => 
+            `<option value="${encodeURIComponent(r)}" ${estado.rivalActual === r ? 'selected' : ''}>${r}</option>`
+          ).join('')}
+        </select>
+      </div>
+    `;
+    
+    // Toggle local/visitante
+    let homeAwayToggleHtml = `
+      <div class="home-away-toggle">
+        <label><i class="fas fa-home"></i> Localidad:</label>
+        <div class="toggle-buttons">
+          <button class="toggle-btn ${estado.equipoEsLocal ? 'active' : ''}" onclick="cambiarLocalidad(true)">
+            <i class="fas fa-home"></i> Local
+          </button>
+          <button class="toggle-btn ${!estado.equipoEsLocal ? 'active' : ''}" onclick="cambiarLocalidad(false)">
+            <i class="fas fa-plane"></i> Visitante
+          </button>
+        </div>
+      </div>
+    `;
+    
+    recoDiv.innerHTML = `<div class="notice">${fuente}</div>${rivalSelectorHtml}${homeAwayToggleHtml}`;
 
     const s = data.stats;
+    const isHome = s.is_home !== false;
+    const locationLabel = isHome ? 'Local' : 'Visitante';
+    
     const statsItems = [
-      ['Rival de referencia', data.rival || '—'],
+      ['Rival', data.rival || '—'],
+      ['Condición', locationLabel],
       ['Posición', s.position || '—'],
       ['Goles/partido', s.goals_per_game],
       ['Recibidos/partido', s.conceded_per_game],
@@ -184,23 +232,56 @@ async function cargarRecomendaciones(leagueCode, teamName) {
       ['Posesión', `${s.possession}%`],
     ];
 
+    // Agregar stats H2H si están disponibles
+    let h2hHtml = '';
+    if (data.h2h_stats && data.h2h_stats.total_matches > 0) {
+      const h2h = data.h2h_stats;
+      h2hHtml = `
+        <div class="h2h-section">
+          <h4><i class="fas fa-history"></i> Historial H2H: ${h2h.team_a} vs ${h2h.team_b}</h4>
+          <div class="h2h-stats-grid">
+            <div class="h2h-stat"><span class="label">Partidos</span><span class="value">${h2h.total_matches}</span></div>
+            <div class="h2h-stat"><span class="label">${h2h.team_a} victorias</span><span class="value">${h2h.team_a_wins} (${h2h.team_a_win_pct}%)</span></div>
+            <div class="h2h-stat"><span class="label">Empates</span><span class="value">${h2h.draws} (${h2h.draw_pct}%)</span></div>
+            <div class="h2h-stat"><span class="label">${h2h.team_b} victorias</span><span class="value">${h2h.team_b_wins} (${h2h.team_b_win_pct}%)</span></div>
+            <div class="h2h-stat"><span class="label">Goles ${h2h.team_a}</span><span class="value">${h2h.team_a_goals} (${h2h.team_a_avg_goals}/part.)</span></div>
+            <div class="h2h-stat"><span class="label">Goles ${h2h.team_b}</span><span class="value">${h2h.team_b_goals} (${h2h.team_b_avg_goals}/part.)</span></div>
+          </div>
+          <div class="h2h-matches">
+            <h5>Últimos enfrentamientos:</h5>
+            ${data.matches ? data.matches.slice(0, 5).map(m => {
+              const date = new Date(m.match_date);
+              const dateStr = date.toLocaleDateString('es', { day: 'numeric', month: 'short', year: '2-digit' });
+              return `<div class="h2h-match"><span>${m.home_team}</span><strong>${m.home_goals} - ${m.away_goals}</strong><span>${m.away_team}</span><small>${dateStr}</small></div>`;
+            }).join('') : '<span>Sin datos</span>'}
+          </div>
+        </div>
+      `;
+    }
+
     statsDiv.innerHTML = statsItems.map(([l, v]) =>
       `<div class="stat-item"><div class="label">${l}</div><div class="value">${v}</div></div>`
-    ).join('');
+    ).join('') + h2hHtml;
 
     const eg = data.expected_goals;
+    // Si es visitante, intercambiar los goles esperados para mostrar
+    const displayHome = isHome ? eg.home : eg.away;
+    const displayAway = isHome ? eg.away : eg.home;
     expDiv.innerHTML = `
       <div class="expected-line"><i class="fas fa-futbol"></i> Goles esperados (Poisson): 
-        <strong>${eg.home}</strong> - <strong>${eg.away}</strong> 
+        <strong>${displayHome}</strong> - <strong>${displayAway}</strong> 
         (total <strong>${eg.total}</strong>)
       </div>
     `;
 
     const p = data.probabilities;
+    // Intercambiar probabilidades si es visitante
+    const probHome = isHome ? p['1'] : p['2'];
+    const probAway = isHome ? p['2'] : p['1'];
     expDiv.innerHTML += `
       <div class="expected-line" style="margin-top:8px;font-size:14px;color:var(--muted)">
-        <i class="fas fa-chart-pie"></i> Local ${(p['1']*100).toFixed(0)}% | Empate ${(p['draw']*100).toFixed(0)}% | 
-        Visitante ${(p['2']*100).toFixed(0)}% · Over2.5 ${(p['over_2.5']*100).toFixed(0)}% · 
+        <i class="fas fa-chart-pie"></i> ${teamName} ${(probHome*100).toFixed(0)}% | Empate ${(p['draw']*100).toFixed(0)}% | 
+        Rival ${(probAway*100).toFixed(0)}% · Over2.5 ${(p['over_2.5']*100).toFixed(0)}% · 
         BTTS ${(p['btts_yes']*100).toFixed(0)}%
       </div>
     `;
@@ -236,6 +317,24 @@ async function cargarRecomendaciones(leagueCode, teamName) {
   } catch (e) {
     statsDiv.innerHTML = `<div class="empty">⚠️ ${e.message}</div>`;
     expDiv.innerHTML = `<div class="notice">${e.message}</div>`;
+  }
+}
+
+function cambiarRival(rivalValue) {
+  if (!rivalValue) {
+    estado.rivalActual = null;
+  } else {
+    estado.rivalActual = decodeURIComponent(rivalValue);
+  }
+  if (estado.equipoActual && estado.ligaActual) {
+    cargarRecomendaciones(estado.ligaActual, estado.equipoActual);
+  }
+}
+
+function cambiarLocalidad(esLocal) {
+  estado.equipoEsLocal = esLocal;
+  if (estado.equipoActual && estado.ligaActual) {
+    cargarRecomendaciones(estado.ligaActual, estado.equipoActual);
   }
 }
 

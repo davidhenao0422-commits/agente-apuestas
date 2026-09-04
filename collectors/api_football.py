@@ -329,30 +329,46 @@ class APIFootballClient:
         return result
 
     def get_upcoming_fixtures(self, league_api_id: int, limit: int = 10) -> list:
-        """Obtiene los próximos partidos de una liga.
+        """Obtiene los próximos partidos de una liga (hoy y mañana).
 
-        Retorna lista de dicts con:
-            'date', 'home_team', 'away_team', 'home_logo', 'away_logo'
+        El plan free solo permite acceder a fechas recientes.
         """
-        data = self._request(
-            "fixtures",
-            {"league": league_api_id, "season": "2024", "next": limit, "status": "NS"}
-        )
-        if not data or data.get("results", 0) == 0:
-            return []
+        from datetime import date, timedelta
 
+        today = date.today()
+        season = str(today.year) if today.month >= 8 else str(today.year - 1)
         fixtures = []
-        for fix in data.get("response", []):
-            teams = fix.get("teams", {})
-            fixture_info = fix.get("fixture", {})
-            fixtures.append({
-                "date": fixture_info.get("date", ""),
-                "home_team": teams.get("home", {}).get("name", ""),
-                "away_team": teams.get("away", {}).get("name", ""),
-                "home_logo": teams.get("home", {}).get("logo", ""),
-                "away_logo": teams.get("away", {}).get("logo", ""),
-            })
-        return fixtures
+
+        # Solo buscar hoy y mañana (límite del plan free)
+        for day_offset in range(2):
+            check_date = today + timedelta(days=day_offset)
+            date_str = check_date.strftime("%Y-%m-%d")
+
+            data = self._request(
+                "fixtures",
+                {"league": league_api_id, "season": season, "date": date_str}
+            )
+
+            if data and data.get("results", 0) > 0:
+                for fix in data.get("response", []):
+                    teams = fix.get("teams", {})
+                    fixture_info = fix.get("fixture", {})
+                    status = fix.get("fixture", {}).get("status", {}).get("short", "")
+
+                    if status in ("NS", "TBD", "PST"):
+                        fixtures.append({
+                            "date": fixture_info.get("date", ""),
+                            "home_team": teams.get("home", {}).get("name", ""),
+                            "away_team": teams.get("away", {}).get("name", ""),
+                            "home_logo": teams.get("home", {}).get("logo", ""),
+                            "away_logo": teams.get("away", {}).get("logo", ""),
+                            "status": status,
+                        })
+
+            if len(fixtures) >= limit:
+                break
+
+        return fixtures[:limit]
 
 
 def db_team_id_for(name_a: str, name_b: str, candidate: str,
