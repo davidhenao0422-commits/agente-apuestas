@@ -149,7 +149,7 @@ async function cargarEquipos() {
   }
 }
 
-function elegirEquipo(encName) {
+async function elegirEquipo(encName) {
   const name = decodeURIComponent(encName);
   estado.equipoActual = name;
   estado.rivalActual = null; // Resetear rival al cambiar de equipo
@@ -320,21 +320,21 @@ async function cargarRecomendaciones(leagueCode, teamName) {
   }
 }
 
-function cambiarRival(rivalValue) {
+async function cambiarRival(rivalValue) {
   if (!rivalValue) {
     estado.rivalActual = null;
   } else {
     estado.rivalActual = decodeURIComponent(rivalValue);
   }
   if (estado.equipoActual && estado.ligaActual) {
-    cargarRecomendaciones(estado.ligaActual, estado.equipoActual);
+    await cargarRecomendaciones(estado.ligaActual, estado.equipoActual);
   }
 }
 
-function cambiarLocalidad(esLocal) {
+async function cambiarLocalidad(esLocal) {
   estado.equipoEsLocal = esLocal;
   if (estado.equipoActual && estado.ligaActual) {
-    cargarRecomendaciones(estado.ligaActual, estado.equipoActual);
+    await cargarRecomendaciones(estado.ligaActual, estado.equipoActual);
   }
 }
 
