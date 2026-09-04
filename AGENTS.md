@@ -352,21 +352,10 @@ DB_PATH=betting_agent.db
 
 ## Despliegue
 
-### Fly.io Free (Recomendado)
+### Render Free (Recomendado)
 - **Costo:** $0 para siempre
-- **Recursos:** VM compartida, 256MB RAM, siempre activa
-- **Sin tarjeta de crédito**
-- Ver `deploy/fly-io/README.md`
-
-### Oracle Cloud Always Free
-- **Costo:** $0 para siempre
-- **Recursos:** 1 OCPU, 1 GB RAM (siempre gratuito)
-- **Requiere tarjeta de crédito para verificación**
-- Ver `deploy/oracle-cloud/README.md`
-
-### Render Free
-- **Costo:** $0
 - **Limitación:** Se duerme tras 15 min de inactividad (despierta en 30s)
+- **Sin tarjeta de crédito**
 - Ver `render.yaml` y `Procfile`
 
 ### Local
@@ -375,6 +364,10 @@ pip install -r requirements.txt
 python run.py
 # Abrir http://localhost:8000
 ```
+
+### Otras opciones (requieren tarjeta)
+- Fly.io Free: 30 días de prueba
+- Oracle Cloud Always Free: Requiere tarjeta de crédito
 
 ---
 
