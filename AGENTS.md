@@ -352,10 +352,16 @@ DB_PATH=betting_agent.db
 
 ## Despliegue
 
-### Oracle Cloud Always Free (Recomendado)
+### Fly.io Free (Recomendado)
+- **Costo:** $0 para siempre
+- **Recursos:** VM compartida, 256MB RAM, siempre activa
+- **Sin tarjeta de crédito**
+- Ver `deploy/fly-io/README.md`
+
+### Oracle Cloud Always Free
 - **Costo:** $0 para siempre
 - **Recursos:** 1 OCPU, 1 GB RAM (siempre gratuito)
-- **Nunca se duerme**
+- **Requiere tarjeta de crédito para verificación**
 - Ver `deploy/oracle-cloud/README.md`
 
 ### Render Free
@@ -460,4 +466,4 @@ Las recomendaciones son de naturaleza **estadística** y **no garantizan resulta
 
 ---
 
-*Documento generado el 2026-09-03. Última actualización: fase de despliegue Oracle Cloud.*
+*Documento generado el 2026-09-04. Última actualización: despliegue Fly.io (gratuito, sin tarjeta de crédito).*
