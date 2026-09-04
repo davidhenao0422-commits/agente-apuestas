@@ -21,7 +21,8 @@ class PredictionEngine:
             self._weights_valid = False
 
     def predict(self, home_data: dict, away_data: dict,
-                h2h_data: dict = None) -> Dict:
+                h2h_data: dict = None, bankroll: float = None,
+                kelly_frac: float = 0.25) -> Dict:
         """Genera una predicción completa para un partido.
 
         Argumentos:
@@ -29,6 +30,8 @@ class PredictionEngine:
                 'goals_per_game', 'conceded_per_game', 'form', etc.
             away_data: stats del equipo visitante.
             h2h_data: análisis de enfrentamientos directos (opcional).
+            bankroll: Bankroll total para Kelly stake (opcional).
+            kelly_frac: Fracción de Kelly (default 0.25 = 1/4 Kelly).
 
         Retorna dict con probabilidades y recomendaciones.
         """
@@ -68,7 +71,9 @@ class PredictionEngine:
         # 4. Generar recomendaciones
         from predictors.recommendations import build_recommendations
 
-        recommendations = build_recommendations(probs, odds or None)
+        recommendations = build_recommendations(
+            probs, odds or None, bankroll=bankroll, kelly_frac=kelly_frac
+        )
 
         return {
             "probabilities": probs,
@@ -79,6 +84,8 @@ class PredictionEngine:
             },
             "recommendations": recommendations,
             "h2h_available": bool(h2h_data),
+            "kelly_fraction": kelly_frac,
+            "bankroll": bankroll,
         }
 
     def _expected_goals(self, home_attack: float, away_defense: float) -> float:

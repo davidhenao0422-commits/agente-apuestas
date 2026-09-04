@@ -3,18 +3,50 @@ from typing import Dict, List, Optional
 from config import Config
 
 
+def kelly_fraction(prob: float, odds: float, kelly_fraction: float = 0.25) -> float:
+    """Calcula fracción de Kelly (con factor de seguridad).
+    
+    Kelly óptimo: f* = (p * b - q) / b = (p * odds - 1) / odds
+    Donde p = probabilidad, b = odds - 1, q = 1 - p
+    
+    Args:
+        prob: Probabilidad estimada (0-1)
+        odds: Cuota decimal
+        kelly_fraction: Fracción de Kelly a usar (0.25 = 1/4 Kelly, conservador)
+    
+    Returns:
+        Fracción del bankroll a apostar (0-1)
+    """
+    if prob <= 0 or odds <= 1:
+        return 0.0
+    
+    # Kelly completo
+    kelly_full = (prob * odds - 1) / (odds - 1)
+    
+    # Aplicar fracción conservadora
+    kelly_adj = max(0.0, kelly_full * kelly_fraction)
+    
+    # Cap máximo por seguridad (nunca más del 5% en 1/4 Kelly)
+    return min(kelly_adj, 0.05)
+
+
 def build_recommendations(probabilities: Dict[str, float],
                           odds: Optional[Dict[str, float]] = None,
-                          min_confidence: Optional[float] = None) -> List[Dict]:
+                          min_confidence: Optional[float] = None,
+                          bankroll: Optional[float] = None,
+                          kelly_frac: float = 0.25) -> List[Dict]:
     """Genera recomendaciones basadas en probabilidades y cuotas.
 
     Argumentos:
         probabilities: Probabilidades calculadas por mercado.
         odds: Cuotas del mercado (opcional).
         min_confidence: Umbral mínimo de confianza (sobreescribe Config).
+        bankroll: Bankroll total para calcular stake (opcional).
+        kelly_frac: Fracción de Kelly (default 0.25 = 1/4 Kelly).
 
     Retorna lista de dicts:
-        {'market', 'choice', 'probability', 'confidence', 'recommended', 'odds', 'edge'}
+        {'market', 'choice', 'probability', 'confidence', 'recommended', 
+         'odds', 'edge', 'kelly_stake', 'kelly_fraction'}
     """
     mins = min_confidence or Config.MIN_CONFIDENCE
     min_edge = Config.MIN_VALUE_EDGE
@@ -67,7 +99,7 @@ def build_recommendations(probabilities: Dict[str, float],
         },
         {
             "name": "Over 2.5",
-            "key": "over_2.5",
+            "key": "over_2_5",
             "choice": "Over 2.5",
             "pick_text": "Más de 2.5 goles",
         },
@@ -85,7 +117,7 @@ def build_recommendations(probabilities: Dict[str, float],
         },
         {
             "name": "Under 2.5",
-            "key": "under_2.5",
+            "key": "under_2_5",
             "choice": "Under 2.5",
             "pick_text": "Menos de 2.5 goles",
         },
@@ -129,6 +161,9 @@ def build_recommendations(probabilities: Dict[str, float],
             "recommended": prob >= mins,
             "odds": None,
             "edge": None,
+            "kelly_fraction": round(kelly_frac, 2),
+            "kelly_stake_pct": None,
+            "kelly_stake_units": None,
         }
 
         # If user provided odds, enrich with value detection
@@ -139,6 +174,11 @@ def build_recommendations(probabilities: Dict[str, float],
             if odds_key:
                 item["odds"] = odds[odds_key]
                 item["edge"] = round(value_edge(prob, odds[odds_key]), 3)
+                # Kelly stake
+                kelly_pct = kelly_fraction(prob, odds[odds_key], kelly_frac)
+                item["kelly_stake_pct"] = round(kelly_pct * 100, 2)
+                if bankroll:
+                    item["kelly_stake_units"] = round(bankroll * kelly_pct, 2)
                 # Sólo recomendar si además hay valor positivo
                 if item["edge"] is not None:
                     item["recommended"] = item["recommended"] and \
