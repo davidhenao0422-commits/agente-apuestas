@@ -494,4 +494,208 @@ main { flex: 1; padding: 30px 0 50px; }
   .home-away-toggle { flex-direction: column; align-items: stretch; }
   .toggle-buttons { justify-content: center; }
   .h2h-stats-grid { grid-template-columns: 1fr 1fr; }
+  .bankroll-controls { flex-direction: column; align-items: stretch; }
+  .bankroll-controls .control-group { width: 100%; }
+  .mejores-grid { grid-template-columns: 1fr; }
+}
+
+/* Bankroll & Kelly Controls */
+.bankroll-card {
+  margin-bottom: 20px;
+}
+.bankroll-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+.bankroll-controls .control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+  flex: 1;
+}
+.bankroll-controls label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.bankroll-controls input,
+.bankroll-controls select {
+  background: var(--bg-card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.bankroll-controls input:focus,
+.bankroll-controls select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.bankroll-controls .btn {
+  margin-top: 4px;
+}
+
+/* Mejores Apuestas del Día */
+.mejores-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--text);
+}
+.mejores-summary span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mejores-summary i { color: var(--accent); }
+
+.mejores-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.mejor-bet-card {
+  background: var(--bg-card);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 20px;
+  transition: all 0.2s;
+}
+.mejor-bet-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.mejor-bet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--card-border);
+}
+.mejor-league {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mejor-date {
+  font-size: 12px;
+  color: var(--muted);
+}
+.mejor-match {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+.mejor-pick {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 14px;
+}
+.mejor-market {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mejor-choice {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.mejor-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mejor-stats .stat {
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  text-align: center;
+}
+.mejor-stats .label {
+  display: block;
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.mejor-stats .value {
+  font-size: 13px;
+  font-weight: 700;
+}
+.edge-alta .value { color: var(--primary); }
+.edge-media .value { color: var(--accent); }
+.edge-baja .value { color: var(--muted); }
+.conf-alta .value { color: var(--primary); }
+.conf-media .value { color: var(--accent); }
+.conf-baja .value { color: var(--muted); }
+
+.mejor-kelly {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--primary-bg);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
+.mejor-kelly .label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.mejor-kelly .value {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--primary);
+}
+.mejor-kelly .value-units {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-left: 8px;
+  opacity: 0.8;
+}
+
+.mejor-xg {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.mejor-xg .value {
+  font-weight: 600;
+  color: var(--text);
 }

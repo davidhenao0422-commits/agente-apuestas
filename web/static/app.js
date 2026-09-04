@@ -9,6 +9,9 @@ let estado = {
   equipoActual: null,
   rivalActual: null,
   equipoEsLocal: true,
+  bankroll: 1000,
+  kellyFrac: 0.25,
+  minEdge: 0.02,
 };
 
 // ---- Utilidades ----
@@ -62,7 +65,21 @@ async function goProximos() {
   $('#nav-inicio').classList.remove('active');
   $('#nav-ligas').classList.remove('active');
   $('#nav-proximos').classList.add('active');
+  $('#nav-mejores').classList.remove('active');
   await cargarProximosPartidos();
+}
+
+async function goMejores() {
+  mostrar('#view-mejores');
+  $('#nav-inicio').classList.remove('active');
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.remove('active');
+  $('#nav-mejores').classList.add('active');
+  // Cargar inputs del estado
+  $('#bankroll-input-global').value = estado.bankroll;
+  $('#kelly-frac-select-global').value = estado.kellyFrac;
+  $('#min-edge-select-global').value = estado.minEdge;
+  await cargarMejoresApuestas();
 }
 
 // ---- Carga de regiones/ligas ----
@@ -172,6 +189,8 @@ async function cargarRecomendaciones(leagueCode, teamName) {
   const params = new URLSearchParams();
   if (estado.rivalActual) params.set('rival', estado.rivalActual);
   params.set('is_home', estado.equipoEsLocal);
+  params.set('bankroll', estado.bankroll);
+  params.set('kelly_frac', estado.kellyFrac);
   url += '?' + params.toString();
 
   try {
@@ -180,6 +199,11 @@ async function cargarRecomendaciones(leagueCode, teamName) {
     const fuente = data.stats && data.stats.data_source === 'real'
       ? '<i class="fas fa-check-circle"></i> Datos reales (API-Football)'
       : '<i class="fas fa-info-circle"></i> Datos preseleccionados. Usa "Actualizar" para datos reales.';
+    
+    // Actualizar inputs de bankroll/kelly con valores del estado
+    $('#bankroll-input').value = estado.bankroll;
+    $('#kelly-frac-select').value = estado.kellyFrac;
+    $('#min-edge-select').value = estado.minEdge;
     
     // Construir selector de rival
     const rivalesDisponibles = estado.equipos
@@ -305,6 +329,13 @@ async function cargarRecomendaciones(leagueCode, teamName) {
       let meta = `Probabilidad ${(rec.probability*100).toFixed(0)}% · ${rec.confidence}`;
       if (esLaMejor) meta += ' · <strong>Opción destacada</strong>';
       if (rec.edge !== null && rec.edge !== undefined) meta += ` · Edge ${(rec.edge*100).toFixed(1)}%`;
+      // Kelly stake info
+      if (rec.kelly_stake_pct !== null && rec.kelly_stake_pct !== undefined && rec.kelly_stake_pct > 0) {
+        meta += ` · <strong>Kelly: ${rec.kelly_stake_pct}%</strong>`;
+        if (rec.kelly_stake_units !== null && rec.kelly_stake_units !== undefined) {
+          meta += ` (${rec.kelly_stake_units.toFixed(2)}€)`;
+        }
+      }
       return `<div class="recomm-item">
         <div class="recomm-badge ${badge}">${check}</div>
         <div class="recomm-body">
@@ -317,6 +348,15 @@ async function cargarRecomendaciones(leagueCode, teamName) {
   } catch (e) {
     statsDiv.innerHTML = `<div class="empty">⚠️ ${e.message}</div>`;
     expDiv.innerHTML = `<div class="notice">${e.message}</div>`;
+  }
+}
+
+function recargarConKelly() {
+  estado.bankroll = parseFloat($('#bankroll-input').value) || 1000;
+  estado.kellyFrac = parseFloat($('#kelly-frac-select').value) || 0.25;
+  estado.minEdge = parseFloat($('#min-edge-select').value) || 0.02;
+  if (estado.equipoActual && estado.ligaActual) {
+    cargarRecomendaciones(estado.ligaActual, estado.equipoActual);
   }
 }
 
@@ -410,9 +450,97 @@ async function actualizarDatos(leagueCode) {
   }
 }
 
+// ---- Mejores Apuestas del Día ----
+async function cargarMejoresApuestas() {
+  const loading = $('#mejores-loading');
+  const errorDiv = $('#mejores-error');
+  const cont = $('#mejores-container');
+  
+  loading.classList.remove('hidden');
+  errorDiv.classList.add('hidden');
+  cont.innerHTML = '';
+  
+  // Leer parámetros
+  estado.bankroll = parseFloat($('#bankroll-input-global').value) || 1000;
+  estado.kellyFrac = parseFloat($('#kelly-frac-select-global').value) || 0.25;
+  estado.minEdge = parseFloat($('#min-edge-select-global').value) || 0.02;
+  
+  try {
+    const params = new URLSearchParams({
+      bankroll: estado.bankroll,
+      kelly_frac: estado.kellyFrac,
+      min_edge: estado.minEdge,
+      max_per_league: 3,
+    });
+    
+    const data = await fetchJson(`/api/mejores-apuestas?${params.toString()}`);
+    
+    loading.classList.add('hidden');
+    
+    if (!data.top_bets || data.top_bets.length === 0) {
+      cont.innerHTML = '<div class="empty">No se encontraron value bets con los filtros actuales. Prueba bajar el edge mínimo.</div>';
+      return;
+    }
+    
+    let html = `<div class="mejores-summary">
+      <span><i class="fas fa-chart-line"></i> Analizados: ${data.total_analyzed} apuestas</span>
+      <span><i class="fas fa-gem"></i> Top seleccionadas: ${data.top_bets.length}</span>
+      <span><i class="fas fa-calendar"></i> ${new Date(data.date).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+    </div>`;
+    
+    html += '<div class="mejores-grid">';
+    
+    data.top_bets.forEach(bet => {
+      const date = new Date(bet.date);
+      const dateStr = date.toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
+      const timeStr = date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+      const edgeClass = bet.edge_pct >= 5 ? 'edge-alta' : (bet.edge_pct >= 3 ? 'edge-media' : 'edge-baja');
+      const confClass = bet.confidence === 'ALTA' ? 'conf-alta' : (bet.confidence === 'MEDIA' ? 'conf-media' : 'conf-baja');
+      
+      html += `
+        <div class="mejor-bet-card">
+          <div class="mejor-bet-header">
+            <span class="mejor-league">${bet.league}</span>
+            <span class="mejor-date">${dateStr} ${timeStr}</span>
+          </div>
+          <div class="mejor-match">${bet.match}</div>
+          <div class="mejor-pick">
+            <span class="mejor-market">${bet.market}</span>
+            <span class="mejor-choice">${bet.pick}</span>
+          </div>
+          <div class="mejor-stats">
+            <div class="stat"><span class="label">Prob</span><span class="value">${(bet.probability*100).toFixed(0)}%</span></div>
+            <div class="stat"><span class="label">Cuota</span><span class="value">${bet.odds}</span></div>
+            <div class="stat ${edgeClass}"><span class="label">Edge</span><span class="value">${bet.edge_pct.toFixed(1)}%</span></div>
+            <div class="stat ${confClass}"><span class="label">Conf</span><span class="value">${bet.confidence}</span></div>
+          </div>
+          <div class="mejor-kelly">
+            <span class="label">Kelly Stake</span>
+            <span class="value">${bet.kelly_stake_pct ? bet.kelly_stake_pct.toFixed(2) + '%' : '—'}</span>
+            <span class="value-units">${bet.kelly_stake_units ? bet.kelly_stake_units.toFixed(2) + '€' : ''}</span>
+          </div>
+          <div class="mejor-xg">
+            <span class="label">xG</span>
+            <span class="value">${bet.expected_goals.home} - ${bet.expected_goals.away} (total ${bet.expected_goals.total})</span>
+          </div>
+        </div>
+      `;
+    });
+    
+    html += '</div>';
+    cont.innerHTML = html;
+    
+  } catch (e) {
+    loading.classList.add('hidden');
+    errorDiv.classList.remove('hidden');
+    errorDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
+  }
+}
+
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', () => {
   $('#nav-inicio').addEventListener('click', goHome);
   $('#nav-ligas').addEventListener('click', goRegiones);
   $('#nav-proximos').addEventListener('click', goProximos);
+  $('#nav-mejores').addEventListener('click', goMejores);
 });
