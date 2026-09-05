@@ -837,10 +837,11 @@ def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float 
 
 
 @app.get("/api/mejores-apuestas")
-def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3, demo: bool = False):
+def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3, demo: bool = False, days_ahead: int = 1):
     """Mejores value bets del día TODAS las ligas combinadas.
     
     Si demo=true: genera partidos simulados para testing de la UI.
+    days_ahead: 0 = solo hoy, 1 = hoy + mañana (default), 2 = hoy + 2 días
     """
     from catalog import get_regions, get_leagues_by_region, get_league_info
     from datetime import date, timedelta
@@ -983,17 +984,21 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
     api = APIFootballClient(db)
     svc = _get_stats_service()
     
-    # Obtener TODOS los partidos de hoy (1 solo request)
-    today = date.today().strftime("%Y-%m-%d")
-    data = api._request("fixtures", {"date": today, "status": "NS"})
+    # Obtener partidos de HOY + MAÑANA (según days_ahead)
+    all_fixtures = []
+    for day_offset in range(days_ahead + 1):
+        check_date = (date.today() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+        data = api._request("fixtures", {"date": check_date, "status": "NS"})
+        if data and data.get("results", 0) > 0:
+            all_fixtures.extend(data.get("response", []))
     
-    if not data or data.get("results", 0) == 0:
+    if not all_fixtures:
         return {
             "date": date.today().isoformat(),
             "total_analyzed": 0,
             "top_bets": [],
-            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge},
-            "message": "No hay partidos hoy",
+            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead},
+            "message": f"No hay partidos en los próximos {days_ahead + 1} día(s)",
         }
     
     # Construir mapa de todos los equipos de nuestro catálogo por liga
@@ -1011,8 +1016,8 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
     
     all_value_bets = []
     
-    # Procesar cada partido del día
-    for fix in data.get("response", [])[:50]:
+    # Procesar cada partido (hoy + mañana)
+    for fix in all_fixtures[:80]:
         teams = fix.get("teams", {})
         fixture_info = fix.get("fixture", {})
         league_info_api = fix.get("league", {})
@@ -1106,5 +1111,5 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
         "date": date.today().isoformat(),
         "total_analyzed": len(all_value_bets),
         "top_bets": final_bets,
-        "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge},
+        "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead},
     }
