@@ -13,6 +13,12 @@ class Config:
     FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "")
     FOOTBALL_DATA_BASE_URL = os.getenv("FOOTBALL_DATA_BASE_URL", "https://api.football-data.org/v4")
 
+    # The Odds API (value betting)
+    ODDS_API_KEY = os.getenv("ODDS_API_KEY", "")
+    ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
+    ODDS_API_REGIONS = os.getenv("ODDS_API_REGIONS", "eu")  # eu, us, uk
+    ODDS_API_BOOKMAKERS = os.getenv("ODDS_API_BOOKMAKERS", "bet365,pinnacle,betfair_ex_uk")  # comma separated
+
     BOT_LANGUAGE = os.getenv("BOT_LANGUAGE", "es")
     DEFAULT_MARKETS = os.getenv("DEFAULT_MARKETS", "1X2,BTS,OVER_UNDER").split(",")
     DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "Europe/Madrid")

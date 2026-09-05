@@ -512,6 +512,23 @@ def _validate_api_config() -> list:
     return errors
 
 
+def _get_all_teams_by_league() -> dict:
+    """Construye mapa de todos los equipos del catálogo por liga."""
+    from catalog import get_regions, get_leagues_by_region, get_league_info
+    result = {}
+    regions = get_regions()
+    for region in regions:
+        ligas = get_leagues_by_region(region["key"])
+        for liga in ligas:
+            info = get_league_info(liga["code"])
+            if info:
+                result[liga["code"]] = {
+                    "name": info["name"],
+                    "teams": set(info["teams"]),
+                }
+    return result
+
+
 def _form_score(form: str) -> float:
     """Convierte 'VVEVD' a un score promedio (V=1, E=0.5, D=0)."""
     if not form:
@@ -974,14 +991,12 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             "demo": True,
         }
     
-    # MODO REAL: API-Football
-    config_errors = _validate_api_config()
-    if config_errors:
-        raise HTTPException(503, detail="API-Football no configurada")
-    
+    # MODO REAL: API-Football + Odds API
     from collectors.api_football import APIFootballClient
+    from collectors.odds_api import OddsAPIClient
     db = _get_db()
     api = APIFootballClient(db)
+    odds_client = OddsAPIClient(db)
     svc = _get_stats_service()
     
     # Obtener partidos de HOY + MAÑANA (según days_ahead)
@@ -1001,18 +1016,35 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             "message": f"No hay partidos en los próximos {days_ahead + 1} día(s)",
         }
     
+    # Obtener odds reales de The Odds API por cada liga que tenga partidos
+    from config import Config
+    odds_api_key = Config.ODDS_API_KEY
+    odds_by_league = {}  # {league_code: {match_key: odds_data}}
+    if odds_api_key:
+        leagues_with_fixtures = set()
+        for fix in all_fixtures:
+            teams_info = fix.get("teams", {})
+            league_info_api = fix.get("league", {})
+            home_name = teams_info.get("home", {}).get("name", "")
+            away_name = teams_info.get("away", {}).get("name", "")
+            for lcode, linf in _get_all_teams_by_league().items():
+                if home_name in linf["teams"] and away_name in linf["teams"]:
+                    leagues_with_fixtures.add(lcode)
+                    break
+        
+        for lcode in leagues_with_fixtures:
+            try:
+                odds_matches = odds_client.get_odds(lcode)
+                if odds_matches:
+                    odds_by_league[lcode] = {}
+                    for om in odds_matches:
+                        match_key = f"{om['home_team']}|{om['away_team']}"
+                        odds_by_league[lcode][match_key] = om
+            except Exception as e:
+                logger.warning(f"Error obteniendo odds para {lcode}: {e}")
+    
     # Construir mapa de todos los equipos de nuestro catálogo por liga
-    all_teams_by_league = {}
-    regions = get_regions()
-    for region in regions:
-        ligas = get_leagues_by_region(region["key"])
-        for liga in ligas:
-            info = get_league_info(liga["code"])
-            if info:
-                all_teams_by_league[liga["code"]] = {
-                    "name": info["name"],
-                    "teams": set(info["teams"]),
-                }
+    all_teams_by_league = _get_all_teams_by_league()
     
     all_value_bets = []
     
@@ -1044,6 +1076,19 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
         if not home_stats or not away_stats:
             continue
         
+        # Buscar odds reales para este partido
+        match_odds = None
+        if matched_league_code in odds_by_league:
+            match_key = f"{home_name}|{away_name}"
+            match_odds = odds_by_league[matched_league_code].get(match_key)
+            if not match_odds:
+                # Intentar invertido
+                match_key_inv = f"{away_name}|{home_name}"
+                match_odds_raw = odds_by_league[matched_league_code].get(match_key_inv)
+                if match_odds_raw:
+                    # Invertir probabilidades
+                    match_odds = match_odds_raw
+        
         h2h_data = None
         team_a_row = db.query_one("SELECT id FROM teams WHERE name = ? AND league = ?", (home_name, matched_league_code))
         team_b_row = db.query_one("SELECT id FROM teams WHERE name = ? AND league = ?", (away_name, matched_league_code))
@@ -1053,6 +1098,7 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
                 h2h_stats = _calculate_h2h_stats(h2h_matches, home_name, away_name)
                 h2h_data = _format_h2h_for_engine(h2h_stats, True)
         
+        # Construir datos para el motor con odds reales si disponibles
         home_data = {
             "goals_per_game": home_stats["goals_per_game"],
             "conceded_per_game": home_stats["conceded_per_game"],
@@ -1066,6 +1112,10 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             "home_performance": {"win_rate": away_stats.get("home_wr", 0.5)},
         }
         
+        # Si hay odds reales, pasarlas al motor
+        if match_odds and match_odds.get("odds_avg"):
+            home_data["odds"] = match_odds["odds_avg"]
+        
         prediction = engine.predict(home_data, away_data, h2h_data=h2h_data, bankroll=bankroll, kelly_frac=kelly_frac)
         
         for rec in prediction["recommendations"]:
@@ -1073,8 +1123,15 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             has_edge = rec.get("edge") is not None and rec["edge"] >= min_edge
             high_prob = rec["probability"] >= 0.70
             
+            # Si hay odds reales: value bet si edge > min_edge
+            # Si no hay odds: high probability pick
             if (has_odds and has_edge) or (not has_odds and high_prob and rec["recommended"]):
-                all_value_bets.append({
+                # Buscar mejor cuota y bookmaker de The Odds API
+                best_odds_info = None
+                if match_odds and match_odds.get("odds_best"):
+                    best_odds_info = match_odds["odds_best"].get(rec["choice"])
+                
+                entry = {
                     "league": matched_league_info["name"],
                     "league_code": matched_league_code,
                     "match": f"{home_name} vs {away_name}",
@@ -1089,7 +1146,17 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
                     "kelly_stake_units": rec.get("kelly_stake_units"),
                     "expected_goals": prediction["expected_goals"],
                     "type": "value_bet" if has_odds else "high_prob",
-                })
+                }
+                
+                # Agregar info del best bookmaker si tenemos odds reales
+                if best_odds_info:
+                    entry["best_odds"] = best_odds_info["odds"]
+                    entry["best_bookmaker"] = best_odds_info["bookmaker"]
+                    entry["odds_source"] = "the_odds_api"
+                elif has_odds:
+                    entry["odds_source"] = "the_odds_api"
+                
+                all_value_bets.append(entry)
     
     all_value_bets.sort(key=lambda x: (
         0 if x.get("type") == "value_bet" else 1,

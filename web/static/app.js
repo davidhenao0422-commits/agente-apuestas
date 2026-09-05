@@ -514,10 +514,12 @@ async function cargarMejoresApuestas() {
           </div>
           <div class="mejor-stats">
             <div class="stat"><span class="label">Prob</span><span class="value">${(bet.probability*100).toFixed(0)}%</span></div>
-            <div class="stat"><span class="label">Cuota</span><span class="value">${bet.odds}</span></div>
-            <div class="stat ${edgeClass}"><span class="label">Edge</span><span class="value">${bet.edge_pct.toFixed(1)}%</span></div>
+            <div class="stat"><span class="label">Cuota</span><span class="value">${bet.best_odds || bet.odds || '—'}</span></div>
+            <div class="stat ${edgeClass}"><span class="label">Edge</span><span class="value">${bet.edge_pct ? bet.edge_pct.toFixed(1) + '%' : '—'}</span></div>
             <div class="stat ${confClass}"><span class="label">Conf</span><span class="value">${bet.confidence}</span></div>
           </div>
+          ${bet.best_bookmaker ? `<div class="mejor-bookmaker"><i class="fas fa-building"></i> Mejor cuota: <strong>${bet.best_bookmaker}</strong> (${bet.best_odds})</div>` : ''}
+          ${bet.odds_source === 'the_odds_api' ? '<div class="mejor-source"><i class="fas fa-check-circle"></i> Odds reales (The Odds API)</div>' : ''}
           <div class="mejor-kelly">
             <span class="label">Kelly Stake</span>
             <span class="value">${bet.kelly_stake_pct ? bet.kelly_stake_pct.toFixed(2) + '%' : '—'}</span>
