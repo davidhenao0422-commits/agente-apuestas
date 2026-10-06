@@ -196,6 +196,21 @@
         <button class="back-btn" onclick="goHome()"><i class="fas fa-arrow-left"></i> Inicio</button>
         <h2><i class="fas fa-calendar"></i> Próximos partidos</h2>
       </div>
+      <div class="card bankroll-card">
+        <div class="bankroll-controls">
+          <div class="control-group">
+            <label><i class="fas fa-calendar-day"></i> Días por delante</label>
+            <select id="days-ahead-proximos" onchange="cargarProximosPartidos()">
+              <option value="0">Solo hoy</option>
+              <option value="1" selected>Hoy + Mañana</option>
+              <option value="2">Próximos 3 días</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="cargarProximosPartidos()">
+            <i class="fas fa-sync"></i> Refrescar
+          </button>
+        </div>
+      </div>
       <div id="proximos-ligas-container"></div>
     </section>
   </main>

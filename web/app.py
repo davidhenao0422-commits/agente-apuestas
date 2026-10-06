@@ -5,7 +5,9 @@ Reutiliza la lógica de análisis probada de los módulos existentes
 REALES guardados en la DB (recolectados desde API-Football) y, si no
 existen, usan los preseleccionados.
 """
+import json
 import logging
+from collections import defaultdict
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -332,6 +334,86 @@ def proximos_partidos(league_code: str):
         "fixtures": [],
         "count": 0,
         "source": "none",
+    }
+
+
+@app.get("/api/proximos-todos")
+def proximos_todos(days_ahead: int = 1):
+    """Próximos partidos de TODAS las ligas del catálogo con 1-2 requests a la API.
+
+    Hace un solo request por fecha (sin filtrar por liga) y luego agrupa los
+    fixtures según los equipos del catálogo. Mucho más rápido y económico que
+    consultar liga por liga.
+    """
+    from datetime import date, timedelta
+
+    config_errors = _validate_api_config()
+    if config_errors:
+        return {"leagues": [], "total_fixtures": 0, "source": "none"}
+
+    from collectors.api_football import APIFootballClient
+    db = _get_db()
+    api = APIFootballClient(db)
+
+    all_teams_by_league = _get_all_teams_by_league()
+
+    all_fixtures = []
+    for day_offset in range(max(0, days_ahead) + 1):
+        check_date = (date.today() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+        data = api._request("fixtures", {"date": check_date, "status": "NS"})
+        if data and data.get("results", 0) > 0:
+            all_fixtures.extend(data.get("response", []))
+
+    if not all_fixtures:
+        return {
+            "leagues": [],
+            "total_fixtures": 0,
+            "source": "api-football",
+            "requests_used": api.request_count,
+        }
+
+    fixtures_by_league = {code: [] for code in all_teams_by_league}
+
+    for fix in all_fixtures:
+        teams = fix.get("teams", {})
+        fixture_info = fix.get("fixture", {})
+        home_name = teams.get("home", {}).get("name", "")
+        away_name = teams.get("away", {}).get("name", "")
+        if not home_name or not away_name:
+            continue
+
+        matched = None
+        for lcode, linf in all_teams_by_league.items():
+            if home_name in linf["teams"] and away_name in linf["teams"]:
+                matched = lcode
+                break
+        if not matched:
+            continue
+
+        fixtures_by_league[matched].append({
+            "date": fixture_info.get("date", ""),
+            "home_team": home_name,
+            "away_team": away_name,
+            "home_logo": teams.get("home", {}).get("logo", ""),
+            "away_logo": teams.get("away", {}).get("logo", ""),
+            "status": (fixture_info.get("status") or {}).get("short", ""),
+        })
+
+    leagues_result = []
+    for lcode, linf in all_teams_by_league.items():
+        if fixtures_by_league[lcode]:
+            leagues_result.append({
+                "league": linf["name"],
+                "league_code": lcode,
+                "fixtures": fixtures_by_league[lcode],
+                "count": len(fixtures_by_league[lcode]),
+            })
+
+    return {
+        "leagues": leagues_result,
+        "total_fixtures": sum(len(f) for f in fixtures_by_league.values()),
+        "source": "api-football",
+        "requests_used": api.request_count,
     }
 
 
@@ -1180,3 +1262,245 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
         "top_bets": final_bets,
         "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead},
     }
+
+
+# ===================== TRANSPARENCY ENDPOINTS =====================
+
+@app.get("/api/transparency/predictions-locked")
+def get_locked_predictions(limit: int = 50):
+    """Predicciones bloqueadas (inmutables) para auditoría."""
+    db = _get_db()
+    locks = db.get_all_prediction_locks(limit)
+    
+    for lock in locks:
+        lock["probabilities"] = json.loads(lock["probabilities"])
+        lock["expected_goals"] = json.loads(lock["expected_goals"])
+        lock["recommendations"] = json.loads(lock["recommendations"])
+        lock["ensemble_weights"] = json.loads(lock["ensemble_weights"])
+        lock["brier_scores"] = json.loads(lock["brier_scores"])
+        if lock["confidence_breakdown"]:
+            lock["confidence_breakdown"] = json.loads(lock["confidence_breakdown"])
+        if lock["kelly_stakes"]:
+            lock["kelly_stakes"] = json.loads(lock["kelly_stakes"])
+    
+    return {"predictions": locks, "count": len(locks)}
+
+
+@app.get("/api/transparency/calibration")
+def get_calibration_dashboard(model: str = None, league: str = None, limit: int = 50):
+    """Dashboard de calibración por modelo/liga."""
+    db = _get_db()
+    records = db.get_calibration_history(model, league, limit)
+    
+    for r in records:
+        if r["reliability_data"]:
+            r["reliability_data"] = json.loads(r["reliability_data"])
+    
+    summary = {}
+    if records:
+        models = set(r["model_name"] for r in records)
+        for m in models:
+            m_records = [r for r in records if r["model_name"] == m]
+            summary[m] = {
+                "avg_brier": round(sum(r["brier_score"] for r in m_records) / len(m_records), 4),
+                "avg_log_loss": round(sum(r["log_loss"] for r in m_records) / len(m_records), 4),
+                "avg_ece": round(sum(r["ece"] for r in m_records) / len(m_records), 4),
+                "total_samples": sum(r["sample_size"] for r in m_records),
+                "last_updated": max(r["date"] for r in m_records),
+            }
+    
+    return {"records": records, "summary": summary, "count": len(records)}
+
+
+@app.get("/api/transparency/clv")
+def get_clv_dashboard(league: str = None, days: int = 30):
+    """Dashboard de Closing Line Value."""
+    db = _get_db()
+    stats = db.get_clv_stats(league, days)
+    records = db.get_clv_history(league, 200)
+    
+    for r in records:
+        r["opening_odds"] = json.loads(r["opening_odds"])
+        r["closing_odds"] = json.loads(r["closing_odds"])
+        r["model_probs"] = json.loads(r["model_probs"])
+    
+    by_league = defaultdict(list)
+    for r in records:
+        by_league[r["league"]].append(r)
+    
+    league_stats = {}
+    for l, recs in by_league.items():
+        beat = sum(1 for r in recs if r["beat_closing_line"])
+        league_stats[l] = {
+            "total": len(recs),
+            "beat_rate": round(beat / len(recs) * 100, 1),
+            "avg_clv": round(sum(r["clv_home"] + r["clv_draw"] + r["clv_away"] for r in recs) / len(recs) / 3 * 100, 2),
+        }
+    
+    return {"overall": stats, "by_league": league_stats, "recent": records[:50]}
+
+
+@app.get("/api/transparency/bookmakers")
+def get_bookmaker_scores(league: str = None, period_days: int = 30):
+    """Scores de calidad/integridad de bookmakers."""
+    db = _get_db()
+    scores = db.get_bookmaker_scores(league, period_days)
+    return {"bookmakers": scores, "count": len(scores)}
+
+
+@app.get("/api/confidence/{league_code}/{home_team}/{away_team}")
+def get_confidence_breakdown(league_code: str, home_team: str, away_team: str):
+    """Desglose completo de confidence score para un partido."""
+    info = get_league_info(league_code)
+    if not info:
+        raise HTTPException(404, detail="Liga no encontrada")
+    
+    svc = _get_stats_service()
+    home_stats = svc.get_team_stats(home_team, league_code)
+    away_stats = svc.get_team_stats(away_team, league_code)
+    
+    if not home_stats or not away_stats:
+        raise HTTPException(404, detail="Equipo no encontrado")
+    
+    from predictors.engine import PredictionEngine
+    engine = PredictionEngine()
+    
+    home_data = {
+        "team_name": home_team,
+        "league": league_code,
+        "goals_per_game": home_stats["goals_per_game"],
+        "conceded_per_game": home_stats["conceded_per_game"],
+        "form": home_stats.get("form", "EEE"),
+        "home_performance": {"win_rate": home_stats.get("home_wr", 0.5)},
+    }
+    away_data = {
+        "team_name": away_team,
+        "league": league_code,
+        "goals_per_game": away_stats["goals_per_game"],
+        "conceded_per_game": away_stats["conceded_per_game"],
+        "form": away_stats.get("form", "EEE"),
+        "home_performance": {"win_rate": away_stats.get("home_wr", 0.5)},
+    }
+    
+    prediction = engine.predict(home_data, away_data, lock_prediction=False)
+    
+    return {
+        "match": f"{home_team} vs {away_team}",
+        "league": info["name"],
+        "confidence_score": prediction.get("confidence_score", 0),
+        "confidence_breakdown": prediction.get("confidence_breakdown", {}),
+        "ensemble_weights": prediction.get("ensemble_weights", {}),
+        "brier_scores": prediction.get("brier_scores", {}),
+        "kelly_stakes": prediction.get("kelly_stakes", {}),
+        "probabilities": prediction["probabilities"],
+        "expected_goals": prediction["expected_goals"],
+        "recommendations": prediction["recommendations"],
+    }
+
+
+@app.get("/api/monte-carlo/{league_code}/{home_team}/{away_team}")
+def get_monte_carlo_simulation(league_code: str, home_team: str, away_team: str,
+                                num_sims: int = 10000, kelly_mult: float = 0.5):
+    """Simulación Monte Carlo de crecimiento de bankroll."""
+    info = get_league_info(league_code)
+    if not info:
+        raise HTTPException(404, detail="Liga no encontrada")
+    
+    svc = _get_stats_service()
+    home_stats = svc.get_team_stats(home_team, league_code)
+    away_stats = svc.get_team_stats(away_team, league_code)
+    
+    if not home_stats or not away_stats:
+        raise HTTPException(404, detail="Equipo no encontrado")
+    
+    from predictors.engine import PredictionEngine
+    from predictors.staking import simulate_growth
+    
+    engine = PredictionEngine()
+    home_data = {"goals_per_game": home_stats["goals_per_game"], "team_name": home_team}
+    away_data = {"goals_per_game": away_stats["goals_per_game"], "team_name": away_team}
+    
+    prediction = engine.predict(home_data, away_data, lock_prediction=False)
+    
+    best_rec = max(prediction["recommendations"], key=lambda r: r.get("probability", 0))
+    
+    if best_rec.get("odds") and best_rec.get("probability"):
+        mc_result = simulate_growth(
+            win_prob=best_rec["probability"],
+            odds=best_rec["odds"],
+            num_bets=500,
+            kelly_mult=kelly_mult,
+            num_paths=2000,
+        )
+        
+        return {
+            "match": f"{home_team} vs {away_team}",
+            "league": info["name"],
+            "best_pick": {
+                "market": best_rec["market"],
+                "pick": best_rec["pick_text"],
+                "probability": best_rec["probability"],
+                "odds": best_rec["odds"],
+            },
+            "monte_carlo": {
+                "median_growth": round(mc_result.median_growth, 3),
+                "mean_growth": round(mc_result.mean_growth, 3),
+                "pct_profitable": round(mc_result.pct_profitable * 100, 1),
+                "max_drawdown_median": round(mc_result.max_drawdown_median * 100, 1),
+                "max_drawdown_p95": round(mc_result.max_drawdown_p95 * 100, 1),
+                "risk_of_ruin": round(mc_result.risk_of_ruin * 100, 1),
+                "final_bankroll_p10": round(mc_result.final_bankroll_p10, 2),
+                "final_bankroll_p50": round(mc_result.final_bankroll_p50, 2),
+                "final_bankroll_p90": round(mc_result.final_bankroll_p90, 2),
+                "sample_paths": mc_result.paths[:20],
+            },
+            "params": {"num_sims": num_sims, "kelly_mult": kelly_mult},
+        }
+    
+    return {"error": "No valid recommendation with odds found"}
+
+
+@app.post("/api/refresh-odds")
+def refresh_odds(league_code: str = None):
+    """Refresca odds desde todas las fuentes configuradas."""
+    from collectors.odds_aggregator import create_odds_aggregator
+    from config import Config
+    
+    api_keys = {
+        "opticodds": getattr(Config, "OPTICODDS_API_KEY", None),
+        "the_odds_api": getattr(Config, "ODDS_API_KEY", None),
+    }
+    
+    aggregator = create_odds_aggregator(api_keys)
+    aggregator.refresh_all()
+    
+    if league_code:
+        matches = aggregator.get_all_matches_odds(league_code)
+    else:
+        matches = aggregator.get_all_matches_odds()
+    
+    return {
+        "refreshed": True,
+        "matches_count": len(matches),
+        "matches": matches[:20],
+    }
+
+
+@app.get("/api/odds/{league_code}/{home_team}/{away_team}")
+def get_match_odds(league_code: str, home_team: str, away_team: str):
+    """Mejores odds disponibles para un partido específico."""
+    from collectors.odds_aggregator import create_odds_aggregator
+    from config import Config
+    
+    api_keys = {
+        "opticodds": getattr(Config, "OPTICODDS_API_KEY", None),
+        "the_odds_api": getattr(Config, "ODDS_API_KEY", None),
+    }
+    
+    aggregator = create_odds_aggregator(api_keys)
+    best_odds = aggregator.get_best_odds(home_team, away_team, league_code)
+    
+    if not best_odds:
+        raise HTTPException(404, detail="No odds found for this match")
+    
+    return best_odds

@@ -482,6 +482,7 @@ main { flex: 1; padding: 30px 0 50px; }
   font-size: 13px;
 }
 .fixture-date { font-size: 13px; color: var(--muted); }
+.fixture-logo { width: 22px; height: 22px; object-fit: contain; }
 
 @media (max-width: 600px) {
   .league-grid { grid-template-columns: 1fr; }

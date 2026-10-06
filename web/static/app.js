@@ -381,43 +381,50 @@ async function cambiarLocalidad(esLocal) {
 // ---- Próximos partidos ----
 async function cargarProximosPartidos() {
   const cont = $('#proximos-ligas-container');
-  cont.innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i> Cargando ligas...</div>';
+  cont.innerHTML = '<div class="empty"><i class="fas fa-spinner fa-spin"></i> Cargando partidos...</div>';
 
   try {
-    const regiones = await fetchJson('/api/regiones');
-    let html = '';
+    const daysAhead = parseInt($('#days-ahead-proximos')?.value || '1') || 1;
+    const data = await fetchJson(`/api/proximos-todos?days_ahead=${daysAhead}`);
 
-    for (const region of regiones) {
-      const ligas = await fetchJson(`/api/ligas/${region.key}`);
-      for (const liga of ligas) {
-        try {
-          const data = await fetchJson(`/api/proximos/${liga.code}`);
-          if (data.fixtures && data.fixtures.length > 0) {
-            html += `<div class="card">
-              <h3 class="card-title"><i class="fas fa-trophy"></i> ${data.league}</h3>
-              <div class="fixtures-list">`;
-            data.fixtures.forEach(f => {
-              const date = new Date(f.date);
-              const dateStr = date.toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
-              const timeStr = date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
-              html += `<div class="fixture-card">
-                <div class="fixture-teams">
-                  <span>${f.home_team}</span>
-                  <span class="fixture-vs">vs</span>
-                  <span>${f.away_team}</span>
-                </div>
-                <div class="fixture-date">${dateStr} ${timeStr}</div>
-              </div>`;
-            });
-            html += '</div></div>';
-          }
-        } catch (e) {
-          // Ignorar errores de ligas sin API
-        }
-      }
+    if (!data.leagues || data.leagues.length === 0) {
+      cont.innerHTML = '<div class="empty">No hay partidos próximos disponibles.</div>';
+      return;
     }
 
-    cont.innerHTML = html || '<div class="empty">No hay partidos próximos disponibles.</div>';
+    let html = '';
+    data.leagues.forEach(l => {
+      html += `<div class="card">
+        <h3 class="card-title"><i class="fas fa-trophy"></i> ${l.league}</h3>
+        <div class="fixtures-list">`;
+      l.fixtures.forEach(f => {
+        const date = new Date(f.date);
+        const dateStr = date.toLocaleDateString('es', { weekday: 'short', day: 'numeric', month: 'short' });
+        const timeStr = date.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+        html += `<div class="fixture-card">
+          <div class="fixture-teams">
+            ${f.home_logo ? `<img class="fixture-logo" src="${f.home_logo}" alt="" loading="lazy"/>` : ''}
+            <span>${f.home_team}</span>
+            <span class="fixture-vs">vs</span>
+            <span>${f.away_team}</span>
+            ${f.away_logo ? `<img class="fixture-logo" src="${f.away_logo}" alt="" loading="lazy"/>` : ''}
+          </div>
+          <div class="fixture-date">${dateStr} ${timeStr}</div>
+        </div>`;
+      });
+      html += '</div></div>';
+    });
+
+    cont.innerHTML = html;
+
+    if (data.total_fixtures > 0) {
+      cont.insertAdjacentHTML('afterbegin', `
+        <div class="mejores-summary">
+          <span><i class="fas fa-futbol"></i> ${data.total_fixtures} partidos próximos</span>
+          <span><i class="fas fa-database"></i> ${data.requests_used ?? '—'} requests API</span>
+        </div>
+      `);
+    }
   } catch (e) {
     cont.innerHTML = `<div class="empty">⚠️ ${e.message}</div>`;
   }

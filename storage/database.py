@@ -96,9 +96,78 @@ CREATE TABLE IF NOT EXISTS predictions (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS prediction_locks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    league TEXT NOT NULL,
+    kickoff TEXT NOT NULL,
+    locked_at TEXT NOT NULL,
+    probabilities TEXT NOT NULL,
+    expected_goals TEXT NOT NULL,
+    recommendations TEXT NOT NULL,
+    ensemble_weights TEXT NOT NULL,
+    brier_scores TEXT NOT NULL,
+    confidence_score INTEGER,
+    confidence_breakdown TEXT,
+    kelly_stakes TEXT,
+    immutable_hash TEXT NOT NULL,
+    UNIQUE(match_id, locked_at)
+);
+
+CREATE TABLE IF NOT EXISTS calibration_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name TEXT NOT NULL,
+    league TEXT NOT NULL,
+    season TEXT NOT NULL,
+    date TEXT NOT NULL,
+    brier_score REAL,
+    log_loss REAL,
+    ece REAL,
+    sample_size INTEGER,
+    reliability_data TEXT,
+    UNIQUE(model_name, league, season, date)
+);
+
+CREATE TABLE IF NOT EXISTS clv_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    league TEXT NOT NULL,
+    opening_odds TEXT,
+    closing_odds TEXT,
+    model_probs TEXT,
+    actual_result TEXT,
+    clv_home REAL,
+    clv_draw REAL,
+    clv_away REAL,
+    beat_closing_line INTEGER,
+    date TEXT NOT NULL,
+    UNIQUE(match_id)
+);
+
+CREATE TABLE IF NOT EXISTS bookmaker_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bookmaker TEXT NOT NULL,
+    league TEXT NOT NULL,
+    period_days INTEGER NOT NULL,
+    accuracy REAL,
+    consistency REAL,
+    clv_score REAL,
+    volume INTEGER,
+    last_updated TEXT NOT NULL,
+    UNIQUE(bookmaker, league, period_days, last_updated)
+);
+
 CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_team_id, away_team_id);
 CREATE INDEX IF NOT EXISTS idx_stats_team_season ON team_stats(team_id, season);
 CREATE INDEX IF NOT EXISTS idx_cache_expiry ON api_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_prediction_locks_match ON prediction_locks(match_id);
+CREATE INDEX IF NOT EXISTS idx_calibration_model_league ON calibration_records(model_name, league);
+CREATE INDEX IF NOT EXISTS idx_clv_match ON clv_records(match_id);
+CREATE INDEX IF NOT EXISTS idx_bookmaker_scores ON bookmaker_scores(bookmaker, league);
 """
 
 
@@ -296,3 +365,160 @@ class Database:
         return self.query(
             "SELECT * FROM predictions ORDER BY created_at DESC LIMIT ?", (limit,)
         )
+
+    # ---------- Prediction Locks (Transparency) ----------
+    def save_prediction_lock(self, lock: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO prediction_locks
+               (match_id, home_team, away_team, league, kickoff, locked_at,
+                probabilities, expected_goals, recommendations, ensemble_weights,
+                brier_scores, confidence_score, confidence_breakdown, kelly_stakes, immutable_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                lock.get("match_id"),
+                lock.get("home_team"),
+                lock.get("away_team"),
+                lock.get("league"),
+                lock.get("kickoff"),
+                lock.get("locked_at"),
+                json.dumps(lock.get("probabilities", {})),
+                json.dumps(lock.get("expected_goals", {})),
+                json.dumps(lock.get("recommendations", [])),
+                json.dumps(lock.get("ensemble_weights", {})),
+                json.dumps(lock.get("brier_scores", {})),
+                lock.get("confidence_score"),
+                json.dumps(lock.get("confidence_breakdown", {})),
+                json.dumps(lock.get("kelly_stakes", {})),
+                lock.get("immutable_hash"),
+            ),
+        )
+
+    def get_prediction_lock(self, match_id: str) -> Optional[dict]:
+        return self.query_one(
+            "SELECT * FROM prediction_locks WHERE match_id = ? ORDER BY locked_at DESC LIMIT 1",
+            (match_id,),
+        )
+
+    def get_all_prediction_locks(self, limit: int = 100) -> List[dict]:
+        return self.query(
+            "SELECT * FROM prediction_locks ORDER BY locked_at DESC LIMIT ?", (limit,)
+        )
+
+    # ---------- Calibration Records ----------
+    def save_calibration_record(self, record: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO calibration_records
+               (model_name, league, season, date, brier_score, log_loss, ece, sample_size, reliability_data)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                record.get("model_name"),
+                record.get("league"),
+                record.get("season"),
+                record.get("date"),
+                record.get("brier_score"),
+                record.get("log_loss"),
+                record.get("ece"),
+                record.get("sample_size"),
+                json.dumps(record.get("reliability_data", {})),
+            ),
+        )
+
+    def get_calibration_history(self, model_name: str = None, league: str = None, 
+                                 limit: int = 100) -> List[dict]:
+        query = "SELECT * FROM calibration_records WHERE 1=1"
+        params = []
+        if model_name:
+            query += " AND model_name = ?"
+            params.append(model_name)
+        if league:
+            query += " AND league = ?"
+            params.append(league)
+        query += " ORDER BY date DESC LIMIT ?"
+        params.append(limit)
+        return self.query(query, tuple(params))
+
+    # ---------- CLV Records ----------
+    def save_clv_record(self, record: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO clv_records
+               (match_id, home_team, away_team, league, opening_odds, closing_odds,
+                model_probs, actual_result, clv_home, clv_draw, clv_away, beat_closing_line, date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                record.get("match_id"),
+                record.get("home_team"),
+                record.get("away_team"),
+                record.get("league"),
+                json.dumps(record.get("opening_odds", {})),
+                json.dumps(record.get("closing_odds", {})),
+                json.dumps(record.get("model_probs", {})),
+                record.get("actual_result"),
+                record.get("clv_home"),
+                record.get("clv_draw"),
+                record.get("clv_away"),
+                1 if record.get("beat_closing_line") else 0,
+                record.get("date"),
+            ),
+        )
+
+    def get_clv_history(self, league: str = None, limit: int = 500) -> List[dict]:
+        query = "SELECT * FROM clv_records WHERE 1=1"
+        params = []
+        if league:
+            query += " AND league = ?"
+            params.append(league)
+        query += " ORDER BY date DESC LIMIT ?"
+        params.append(limit)
+        return self.query(query, tuple(params))
+
+    def get_clv_stats(self, league: str = None, days: int = 30) -> dict:
+        from datetime import date, timedelta
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        
+        query = "SELECT * FROM clv_records WHERE date >= ?"
+        params = [cutoff]
+        if league:
+            query += " AND league = ?"
+            params.append(league)
+        
+        records = self.query(query, tuple(params))
+        
+        if not records:
+            return {"total": 0, "beat_rate": 0, "avg_clv": 0}
+        
+        beat = sum(1 for r in records if r["beat_closing_line"])
+        avg_clv = sum(r["clv_home"] + r["clv_draw"] + r["clv_away"] for r in records) / len(records) / 3
+        
+        return {
+            "total": len(records),
+            "beat_count": beat,
+            "beat_rate": round(beat / len(records) * 100, 1),
+            "avg_clv": round(avg_clv * 100, 2),
+        }
+
+    # ---------- Bookmaker Scores ----------
+    def save_bookmaker_score(self, record: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO bookmaker_scores
+               (bookmaker, league, period_days, accuracy, consistency, clv_score, volume, last_updated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                record.get("bookmaker"),
+                record.get("league"),
+                record.get("period_days"),
+                record.get("accuracy"),
+                record.get("consistency"),
+                record.get("clv_score"),
+                record.get("volume"),
+                record.get("last_updated"),
+            ),
+        )
+
+    def get_bookmaker_scores(self, league: str = None, period_days: int = 30) -> List[dict]:
+        query = "SELECT * FROM bookmaker_scores WHERE period_days = ?"
+        params = [period_days]
+        if league:
+            query += " AND league = ?"
+            params.append(league)
+        query += " ORDER BY last_updated DESC"
+        return self.query(query, tuple(params))

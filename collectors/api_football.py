@@ -331,12 +331,12 @@ class APIFootballClient:
     def get_upcoming_fixtures(self, league_api_id: int, limit: int = 10) -> list:
         """Obtiene los próximos partidos de una liga (hoy y mañana).
 
-        El plan free solo permite acceder a fechas recientes.
+        No usa 'season' porque el plan free no expone temporadas actuales y
+        el filtro por fecha + liga es suficiente para partidos programados.
         """
         from datetime import date, timedelta
 
         today = date.today()
-        season = str(today.year) if today.month >= 8 else str(today.year - 1)
         fixtures = []
 
         # Solo buscar hoy y mañana (límite del plan free)
@@ -346,7 +346,7 @@ class APIFootballClient:
 
             data = self._request(
                 "fixtures",
-                {"league": league_api_id, "season": season, "date": date_str}
+                {"league": league_api_id, "date": date_str, "status": "NS"}
             )
 
             if data and data.get("results", 0) > 0:

@@ -464,4 +464,79 @@ Las recomendaciones son de naturaleza **estadística** y **no garantizan resulta
 
 ---
 
-*Documento generado el 2026-09-04. Última actualización: despliegue Fly.io (gratuito, sin tarjeta de crédito).*
+---
+
+## Bot de Telegram - Configuración Completada
+
+### Bot Creado
+- **Nombre:** Fútbol Pronóstico
+- **Username:** @futbol_stats_2024_bot
+- **Token:** 8965821862:AAGloUorPwlrjysPVgmSp1lOGHSRVNaSRoM
+- **Fecha creación:** 2026-10-01
+
+### Canal de Recomendaciones
+- **Nombre:** Apuestas_Futbol
+- **Enlace:** https://t.me/apuestasdefutbol229804
+- **Propósito:** Recibir recomendaciones automáticas diarias
+
+### Comandos del Bot
+| Comando | Descripción |
+|---------|-------------|
+| `/start` | Iniciar el bot y ver instrucciones |
+| `/analizar` | Analizar equipos específicos |
+| `/historial` | Ver predicciones anteriores |
+| `/ayuda` | Más información |
+
+### Archivos Nuevos
+
+#### scheduler.py
+Sistema automatizado que:
+- Obtiene partidos de todas las ligas (prioriza: La Liga, Premier League, Serie A, Bundesliga, Ligue 1, Champions League)
+- Analiza cada partido con el modelo Poisson
+- Envía recomendaciones automáticas al canal de Telegram
+- Se ejecuta todos los días a las 8:00 AM
+
+#### test_channel.py
+Script de prueba para verificar la conexión entre el bot y el canal.
+
+### Ejecución
+
+**Bot interactivo (terminal local):**
+```bash
+python main.py
+```
+
+**Scheduler automático (envío al canal):**
+```bash
+python scheduler.py
+```
+
+**Prueba de conexión al canal:**
+```bash
+python test_channel.py
+```
+
+### Notas Importantes
+
+1. **Límite de API:** 100 requests/día (plan gratuito API-Football)
+   - Scheduler prioriza 6 ligas principales para no agotar el cupo
+   - Cada liga consume ~1-2 requests por ejecución
+
+2. **Canal de Telegram:**
+   - El bot debe ser administrador del canal
+   - Debe tener permisos para publicar mensajes
+   - Si el canal es privado, se necesita el ID numérico
+
+3. **Ejecución continua:**
+   - El bot en PC local solo funciona cuando la PC está encendida
+   - Para 24/7, considerar Oracle Cloud Always Free (requiere tarjeta)
+
+### Estado Actual
+- ✅ Bot de Telegram configurado y funcionando
+- ✅ Canal de recomendaciones creado
+- ⏳ Pendiente: Verificar conexión bot-canal (nombre exacto del canal)
+- ⏳ Pendiente: Probar scheduler con partidos reales
+
+---
+
+*Documento generado el 2026-09-04. Última actualización: 2026-10-01 - Bot Telegram configurado.*

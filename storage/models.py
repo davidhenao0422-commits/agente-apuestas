@@ -106,3 +106,72 @@ class Prediction:
     reasoning: str = ""
     created_at: Optional[str] = None
     id: Optional[int] = None
+
+
+@dataclass
+class PredictionLock:
+    """Predicción bloqueada (inmutable) para transparencia."""
+    match_id: str
+    home_team: str
+    away_team: str
+    league: str
+    kickoff: str
+    locked_at: str
+    probabilities: dict
+    expected_goals: dict
+    recommendations: list
+    ensemble_weights: dict
+    brier_scores: dict
+    confidence_score: int
+    confidence_breakdown: dict
+    kelly_stakes: dict
+    immutable_hash: str
+    id: Optional[int] = None
+
+
+@dataclass
+class CalibrationRecord:
+    """Registro de calibración por modelo/liga/temporada."""
+    model_name: str
+    league: str
+    season: str
+    date: str
+    brier_score: float
+    log_loss: float
+    ece: float
+    sample_size: int
+    reliability_data: dict
+    id: Optional[int] = None
+
+
+@dataclass
+class CLVRecord:
+    """Registro de Closing Line Value."""
+    match_id: str
+    home_team: str
+    away_team: str
+    league: str
+    opening_odds: dict
+    closing_odds: dict
+    model_probs: dict
+    actual_result: str
+    clv_home: float
+    clv_draw: float
+    clv_away: float
+    beat_closing_line: bool
+    date: str
+    id: Optional[int] = None
+
+
+@dataclass
+class BookmakerScore:
+    """Puntuación de integridad/calidad de bookmaker."""
+    bookmaker: str
+    league: str
+    period_days: int
+    accuracy: float
+    consistency: float
+    clv_score: float
+    volume: int
+    last_updated: str
+    id: Optional[int] = None
