@@ -10,7 +10,15 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: API_FOOTBALL_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
       - key: BOT_LANGUAGE
         value: es
       - key: DEFAULT_MARKETS
         value: 1X2,BTS,OVER_UNDER
+      - key: API_FOOTBALL_BASE_URL
+        value: https://v3.football.api-sports.io
+      - key: DB_PATH
+        value: betting_agent.db
