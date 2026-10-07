@@ -1509,3 +1509,109 @@ def get_match_odds(league_code: str, home_team: str, away_team: str):
         raise HTTPException(404, detail="No odds found for this match")
     
     return best_odds
+
+
+# ===================== STEAM MOVES ENDPOINTS =====================
+
+@app.get("/api/steam-moves")
+def get_steam_moves(
+    hours_back: int = 2,
+    min_severity: str = "medium",
+    match_id: str = None,
+    limit: int = 50
+):
+    """Detecta steam moves (movimientos bruscos de líneas en bookmakers sharp).
+    
+    Args:
+        hours_back: Ventana temporal hacia atrás (default 2h)
+        min_severity: Severidad mínima (low, medium, high, extreme)
+        match_id: Filtrar por partido específico
+        limit: Máximo resultados
+    """
+    from analyzers.steam_moves import create_steam_detector
+    db = _get_db()
+    detector = create_steam_detector(db)
+    
+    moves = detector.detect_steam_moves(
+        match_id=match_id,
+        hours_back=hours_back,
+        min_severity=min_severity
+    )
+    
+    return {
+        "moves": [
+            {
+                "match_id": m.match_id,
+                "match": f"{m.home_team} vs {m.away_team}",
+                "league": m.league,
+                "kickoff": m.kickoff,
+                "bookmaker": m.bookmaker,
+                "market": m.market,
+                "direction": m.direction,
+                "old_odds": m.old_odds,
+                "new_odds": m.new_odds,
+                "pct_change": m.pct_change,
+                "time_elapsed_min": m.time_elapsed_min,
+                "severity": m.severity,
+                "timestamp": m.timestamp,
+                "implied_prob_change": m.implied_prob_change,
+            }
+            for m in moves[:limit]
+        ],
+        "count": len(moves),
+        "params": {"hours_back": hours_back, "min_severity": min_severity, "match_id": match_id},
+    }
+
+
+@app.get("/api/steam-moves/summary")
+def get_steam_summary(hours_back: int = 24):
+    """Resumen agregado de steam moves para dashboard."""
+    from analyzers.steam_moves import create_steam_detector
+    db = _get_db()
+    detector = create_steam_detector(db)
+    
+    return detector.get_steam_summary(hours_back=hours_back)
+
+
+@app.get("/api/steam-moves/{match_id}/history")
+def get_match_odds_history(match_id: str, market: str = "h2h", hours_back: int = 24):
+    """Historial de odds para un partido específico (para gráficos)."""
+    db = _get_db()
+    snapshots = db.get_odds_snapshots(match_id, market=market, hours_back=hours_back)
+    
+    # Separar por bookmaker para visualización
+    by_bookmaker = {}
+    for snap in snapshots:
+        bm = snap["bookmaker"]
+        if bm not in by_bookmaker:
+            by_bookmaker[bm] = []
+        by_bookmaker[bm].append({
+            "timestamp": snap["snapshot_at"],
+            "odds_home": snap["odds_home"],
+            "odds_draw": snap["odds_draw"],
+            "odds_away": snap["odds_away"],
+            "odds_over": snap["odds_over"],
+            "odds_under": snap["odds_under"],
+            "odds_btts_yes": snap["odds_btts_yes"],
+            "odds_btts_no": snap["odds_btts_no"],
+            "is_sharp": snap["is_sharp"],
+        })
+    
+    return {
+        "match_id": match_id,
+        "market": market,
+        "by_bookmaker": by_bookmaker,
+        "total_snapshots": len(snapshots),
+    }
+
+
+@app.post("/api/steam-moves/poll")
+def trigger_odds_poll():
+    """Dispara manualmente el polling de odds (para testing)."""
+    from analyzers.steam_moves import poll_and_store_odds
+    from collectors.odds_api import OddsAPIClient
+    db = _get_db()
+    odds_client = OddsAPIClient(db)
+    
+    saved = poll_and_store_odds(db, odds_client)
+    return {"polling_completed": True, "snapshots_saved": saved}

@@ -161,6 +161,27 @@ CREATE TABLE IF NOT EXISTS bookmaker_scores (
     UNIQUE(bookmaker, league, period_days, last_updated)
 );
 
+CREATE TABLE IF NOT EXISTS odds_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    league TEXT NOT NULL,
+    kickoff TEXT NOT NULL,
+    bookmaker TEXT NOT NULL,
+    market TEXT NOT NULL,
+    odds_home REAL,
+    odds_draw REAL,
+    odds_away REAL,
+    odds_over REAL,
+    odds_under REAL,
+    odds_btts_yes REAL,
+    odds_btts_no REAL,
+    snapshot_at TEXT NOT NULL,
+    is_sharp INTEGER DEFAULT 0,
+    UNIQUE(match_id, bookmaker, market, snapshot_at)
+);
+
 CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_team_id, away_team_id);
 CREATE INDEX IF NOT EXISTS idx_stats_team_season ON team_stats(team_id, season);
 CREATE INDEX IF NOT EXISTS idx_cache_expiry ON api_cache(expires_at);
@@ -168,6 +189,9 @@ CREATE INDEX IF NOT EXISTS idx_prediction_locks_match ON prediction_locks(match_
 CREATE INDEX IF NOT EXISTS idx_calibration_model_league ON calibration_records(model_name, league);
 CREATE INDEX IF NOT EXISTS idx_clv_match ON clv_records(match_id);
 CREATE INDEX IF NOT EXISTS idx_bookmaker_scores ON bookmaker_scores(bookmaker, league);
+CREATE INDEX IF NOT EXISTS idx_odds_snapshots_match ON odds_snapshots(match_id);
+CREATE INDEX IF NOT EXISTS idx_odds_snapshots_time ON odds_snapshots(snapshot_at);
+CREATE INDEX IF NOT EXISTS idx_odds_snapshots_sharp ON odds_snapshots(is_sharp, snapshot_at);
 """
 
 
@@ -522,3 +546,69 @@ class Database:
             params.append(league)
         query += " ORDER BY last_updated DESC"
         return self.query(query, tuple(params))
+
+    # ---------- Odds Snapshots (Steam Move Detection) ----------
+    def save_odds_snapshot(self, snapshot: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO odds_snapshots
+               (match_id, home_team, away_team, league, kickoff, bookmaker, market,
+                odds_home, odds_draw, odds_away, odds_over, odds_under,
+                odds_btts_yes, odds_btts_no, snapshot_at, is_sharp)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                snapshot.get("match_id"),
+                snapshot.get("home_team"),
+                snapshot.get("away_team"),
+                snapshot.get("league"),
+                snapshot.get("kickoff"),
+                snapshot.get("bookmaker"),
+                snapshot.get("market"),
+                snapshot.get("odds_home"),
+                snapshot.get("odds_draw"),
+                snapshot.get("odds_away"),
+                snapshot.get("odds_over"),
+                snapshot.get("odds_under"),
+                snapshot.get("odds_btts_yes"),
+                snapshot.get("odds_btts_no"),
+                snapshot.get("snapshot_at"),
+                1 if snapshot.get("is_sharp") else 0,
+            ),
+        )
+
+    def get_odds_snapshots(self, match_id: str, bookmaker: str = None, 
+                           market: str = None, hours_back: int = 24) -> List[dict]:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(hours=hours_back)).isoformat()
+        
+        query = "SELECT * FROM odds_snapshots WHERE match_id = ? AND snapshot_at >= ?"
+        params = [match_id, cutoff]
+        
+        if bookmaker:
+            query += " AND bookmaker = ?"
+            params.append(bookmaker)
+        if market:
+            query += " AND market = ?"
+            params.append(market)
+            
+        query += " ORDER BY snapshot_at ASC"
+        return self.query(query, tuple(params))
+
+    def get_latest_odds(self, match_id: str, market: str = "h2h") -> List[dict]:
+        return self.query(
+            """SELECT * FROM odds_snapshots 
+               WHERE match_id = ? AND market = ?
+               ORDER BY snapshot_at DESC LIMIT 1""",
+            (match_id, market),
+        )
+
+    def get_sharp_bookmakers_odds(self, match_id: str, market: str = "h2h", 
+                                   hours_back: int = 6) -> List[dict]:
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(hours=hours_back)).isoformat()
+        
+        return self.query(
+            """SELECT * FROM odds_snapshots 
+               WHERE match_id = ? AND market = ? AND is_sharp = 1 AND snapshot_at >= ?
+               ORDER BY bookmaker, snapshot_at ASC""",
+            (match_id, market, cutoff),
+        )

@@ -1,4 +1,4 @@
-"""Scheduler para recomendaciones automáticas diarias.
+"""Scheduler para recomendaciones automáticas diarias + Steam Move Detection.
 
 Ejecución:
     python scheduler.py
@@ -19,8 +19,10 @@ from telegram.ext import Application
 from config import Config
 from catalog import CATALOGO
 from collectors.api_football import APIFootballClient
+from collectors.odds_api import OddsAPIClient
 from storage.database import Database
 from predictors.engine import PredictionEngine
+from analyzers.steam_moves import SteamMoveDetector, poll_and_store_odds
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,9 +34,12 @@ class BettingScheduler:
     def __init__(self):
         self.db = Database()
         self.api = APIFootballClient(self.db)
+        self.odds_client = OddsAPIClient(self.db)
         self.engine = PredictionEngine()
+        self.steam_detector = SteamMoveDetector(self.db)
         self.bot: Optional[Bot] = None
         self.channel_id: Optional[str] = None
+        self._steam_alert_sent = set()  # Evitar alertas duplicadas
         
     def set_channel(self, channel_id: str):
         self.channel_id = channel_id
@@ -388,6 +393,91 @@ class BettingScheduler:
         logger.info(f"TAREA COMPLETADA. Requests API usados: {self.api.request_count}")
         logger.info("=" * 50)
 
+    # ===================== STEAM MOVE DETECTION JOBS =====================
+
+    def poll_odds_job(self):
+        """Job programado: obtienen odds actuales y guardan snapshots."""
+        logger.info("📊 Iniciando polling de odds...")
+        try:
+            saved = poll_and_store_odds(self.db, self.odds_client)
+            logger.info(f"✅ Polling completado. {saved} snapshots guardados.")
+        except Exception as e:
+            logger.error(f"Error en polling de odds: {e}")
+
+    async def detect_steam_moves_job(self):
+        """Job programado: detecta steam moves y envía alertas al canal."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("⚡ Escaneando steam moves...")
+        try:
+            moves = self.steam_detector.detect_steam_moves(hours_back=1, min_severity="medium")
+            
+            for move in moves:
+                alert_key = f"{move.match_id}_{move.bookmaker}_{move.market}_{move.direction}_{move.timestamp}"
+                
+                if alert_key in self._steam_alert_sent:
+                    continue
+                
+                self._steam_alert_sent.add(alert_key)
+                
+                # Limpiar cache de alertas antiguas (>2 horas)
+                if len(self._steam_alert_sent) > 1000:
+                    self._steam_alert_sent.clear()
+                
+                message = self.steam_detector.format_telegram_alert(move)
+                
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.channel_id,
+                        text=message,
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"🚨 Alerta steam enviada: {move.home_team} vs {move.away_team} ({move.severity})")
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.error(f"Error enviando alerta steam: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error detectando steam moves: {e}")
+
+    async def steam_summary_job(self):
+        """Job diario: resumen de steam moves del día."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("📈 Generando resumen diario de steam moves...")
+        try:
+            summary = self.steam_detector.get_steam_summary(hours_back=24)
+            
+            if summary["total_moves"] == 0:
+                message = "📈 <b>Resumen Steam Moves (24h)</b>\n\nNo se detectaron movimientos significativos."
+            else:
+                message = f"📈 <b>Resumen Steam Moves (24h)</b>\n\n"
+                message += f"🔴 Extreme: {summary['by_severity']['extreme']} | "
+                message += f"🟠 High: {summary['by_severity']['high']} | "
+                message += f"🟡 Medium: {summary['by_severity']['medium']} | "
+                message += f"🟢 Low: {summary['by_severity']['low']}\n\n"
+                
+                message += "🏆 <b>Top 5 movimientos:</b>\n"
+                for i, m in enumerate(summary["top_moves"][:5], 1):
+                    sev_emoji = {"extreme": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(m["severity"], "⚪")
+                    message += (
+                        f"{i}. {sev_emoji} {m['match']} ({m['league']})\n"
+                        f"   {m['bookmaker']} | {m['market'].upper()} {m['direction']} "
+                        f"{m['pct_change']:.1f}% en {m['time_min']:.0f}min\n"
+                    )
+            
+            await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("✅ Resumen diario de steam moves enviado")
+            
+        except Exception as e:
+            logger.error(f"Error enviando resumen steam: {e}")
+
 
 def run_scheduler():
     scheduler = BettingScheduler()
@@ -403,14 +493,33 @@ def run_scheduler():
         await scheduler.init_bot()
         await scheduler.run_daily_job(use_priority=True)
     
-    print("\nEl scheduler está configurado para ejecutarse todos los días a las 8:00 AM")
-    print("También puedes ejecutarlo manualmente ahora mismo.\n")
+    async def steam_detection_task():
+        await scheduler.init_bot()
+        await scheduler.detect_steam_moves_job()
     
-    choice = input("¿Ejecutar ahora? (s/n): ").strip().lower()
+    async def steam_summary_task():
+        await scheduler.init_bot()
+        await scheduler.steam_summary_job()
+    
+    print("\n" + "=" * 50)
+    print("SCHEDULER CONFIGURADO")
+    print("=" * 50)
+    print("📅 Recomendaciones diarias: 08:00 AM")
+    print("📊 Polling odds (snapshots): cada 10 min")
+    print("⚡ Detección steam moves: cada 15 min")
+    print("📈 Resumen steam diario: 23:00")
+    print("=" * 50)
+    print("También puedes ejecutar la tarea diaria manualmente ahora.\n")
+    
+    choice = input("¿Ejecutar recomendaciones diarias ahora? (s/n): ").strip().lower()
     if choice == "s":
         asyncio.run(daily_task())
     
+    # Jobs programados
     schedule.every().day.at("08:00").do(lambda: asyncio.run(daily_task()))
+    schedule.every(10).minutes.do(scheduler.poll_odds_job)
+    schedule.every(15).minutes.do(lambda: asyncio.run(steam_detection_task()))
+    schedule.every().day.at("23:00").do(lambda: asyncio.run(steam_summary_task()))
     
     print("\nScheduler ejecutándose. Presiona Ctrl+C para detener.")
     while True:
