@@ -21,6 +21,7 @@
         <button class="nav-btn" id="nav-bookmakers"><i class="fas fa-chart-line"></i> Bookmakers</button>
         <button class="nav-btn" id="nav-paper"><i class="fas fa-chart-area"></i> Paper Trading</button>
         <button class="nav-btn" id="nav-risk"><i class="fas fa-shield-alt"></i> Risk Mgmt</button>
+        <button class="nav-btn" id="nav-ml"><i class="fas fa-brain"></i> ML Models</button>
       </nav>
     </div>
   </header>
@@ -523,8 +524,160 @@
       </div>
       <div id="proximos-ligas-container"></div>
     </section>
+ 
+    <!-- Vista ML Models -->
+    <section id="view-ml" class="view hidden">
+      <div class="page-head">
+        <button class="back-btn" onclick="goHome()"><i class="fas fa-arrow-left"></i> Inicio</button>
+        <h2><i class="fas fa-brain"></i> ML Model Management</h2>
+      </div>
+      
+      <!-- Model Registry -->
+      <div class="card" id="ml-registry-card">
+        <h3 class="card-title"><i class="fas fa-cubes"></i> Model Registry</h3>
+        <div class="bankroll-controls">
+          <div class="control-group">
+            <label><i class="fas fa-filter"></i> Modelo</label>
+            <select id="ml-model-filter" onchange="cargarModelVersions()">
+              <option value="">Todos</option>
+              <option value="ensemble">Ensemble</option>
+              <option value="poisson">Poisson</option>
+              <option value="dixon_coles">Dixon-Coles</option>
+              <option value="bivariate_poisson">Bivariate Poisson</option>
+              <option value="skellam">Skellam</option>
+              <option value="elo">ELO</option>
+              <option value="pi_ratings">PI Ratings</option>
+              <option value="xg_model">xG Model</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-flag"></i> Estado</label>
+            <select id="ml-status-filter" onchange="cargarModelVersions()">
+              <option value="">Todos</option>
+              <option value="training">Training</option>
+              <option value="ready">Ready</option>
+              <option value="deployed">Deployed</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="cargarModelVersions()">
+            <i class="fas fa-sync"></i> Refrescar
+          </button>
+        </div>
+        <div id="ml-loading" class="empty hidden"><i class="fas fa-spinner fa-spin"></i> Cargando modelos...</div>
+        <div id="ml-error" class="notice hidden"></div>
+        <div class="table-responsive">
+          <table id="ml-models-table">
+            <thead>
+              <tr>
+                <th>Modelo</th>
+                <th>Versión</th>
+                <th>Estado</th>
+                <th>Brier Score</th>
+                <th>Log Loss</th>
+                <th>Accuracy</th>
+                <th>ROI</th>
+                <th>Sharpe</th>
+                <th>Cal. Error</th>
+                <th>Creado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="ml-models-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- Champion Models -->
+      <div class="card" id="ml-champion-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-crown"></i> Modelos en Producción (Champions)</h3>
+        <div id="ml-champion-list" class="stats-grid"></div>
+      </div>
+ 
+      <!-- Training Runs -->
+      <div class="card" id="ml-runs-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-history"></i> Historial de Entrenamientos</h3>
+        <div class="table-responsive">
+          <table id="ml-runs-table">
+            <thead>
+              <tr>
+                <th>Modelo</th>
+                <th>Versión</th>
+                <th>Tipo</th>
+                <th>Estado</th>
+                <th>Métricas</th>
+                <th>Duración</th>
+                <th>Iniciado</th>
+                <th>Trigger</th>
+              </tr>
+            </thead>
+            <tbody id="ml-runs-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- A/B Testing -->
+      <div class="card" id="ml-ab-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-flask"></i> A/B Testing</h3>
+        <div class="bankroll-controls" style="margin-bottom: 16px;">
+          <div class="control-group">
+            <label><i class="fas fa-plus"></i> Nuevo Experimento</label>
+            <button class="btn btn-secondary btn-sm" onclick="mostrarModalAB()">
+              <i class="fas fa-plus"></i> Crear
+            </button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table id="ml-ab-table">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Modelo A</th>
+                <th>Modelo B</th>
+                <th>Split</th>
+                <th>Estado</th>
+                <th>Métrica</th>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="ml-ab-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- Ensemble Optimization -->
+      <div class="card" id="ml-opt-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-sliders-h"></i> Optimización Ensemble (Optuna)</h3>
+        <div class="bankroll-controls">
+          <div class="control-group">
+            <label><i class="fas fa-flask"></i> Trials</label>
+            <input type="number" id="opt-trials" value="50" min="10" max="200" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-clock"></i> Timeout (seg)</label>
+            <input type="number" id="opt-timeout" value="1800" min="300" max="7200" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-trophy"></i> Ligas (opcional)</label>
+            <input type="text" id="opt-leagues" placeholder="PD,PL,SA" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-calendar"></i> Lookback (días)</label>
+            <input type="number" id="opt-lookback" value="180" min="30" max="730" />
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="optimizarEnsemble()">
+            <i class="fas fa-rocket"></i> Optimizar Pesos
+          </button>
+        </div>
+        <div id="ml-opt-loading" class="empty hidden"><i class="fas fa-spinner fa-spin"></i> Optimizando...</div>
+        <div id="ml-opt-result" class="notice hidden"></div>
+      </div>
+    </section>
+ 
   </main>
-
+ 
   <footer class="footer">
     <div class="container">
       <p><i class="fas fa-exclamation-triangle"></i> Las recomendaciones son estadísticas y no garantizan resultados. Las apuestas conllevan riesgo.</p>

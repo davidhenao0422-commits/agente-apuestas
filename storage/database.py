@@ -290,6 +290,97 @@ CREATE INDEX IF NOT EXISTS idx_risk_limits_portfolio ON risk_limits(portfolio_id
 CREATE INDEX IF NOT EXISTS idx_risk_alerts_portfolio ON risk_alerts(portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_risk_alerts_ack ON risk_alerts(acknowledged);
 CREATE INDEX IF NOT EXISTS idx_correlations_portfolio ON portfolio_correlations(portfolio_id);
+
+-- ML Pipeline Tables
+CREATE TABLE IF NOT EXISTS model_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name TEXT NOT NULL,           -- poisson, dixon_coles, ensemble, etc.
+    version TEXT NOT NULL,              -- semver: 1.2.3
+    parameters TEXT NOT NULL,           -- JSON con hiperparámetros
+    metrics TEXT NOT NULL,              -- JSON con métricas: brier, log_loss, accuracy, roi
+    training_data_hash TEXT,            -- Hash de datos de entrenamiento
+    artifact_path TEXT,                 -- Ruta al modelo serializado
+    status TEXT NOT NULL DEFAULT 'training',  -- training, ready, deployed, archived, failed
+    is_champion INTEGER DEFAULT 0,      -- 1 = modelo en producción
+    parent_version_id INTEGER,          -- Para lineage
+    created_at TEXT DEFAULT (datetime('now')),
+    deployed_at TEXT,
+    UNIQUE(model_name, version)
+);
+
+CREATE TABLE IF NOT EXISTS training_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    run_type TEXT NOT NULL,             -- scheduled, manual, ab_test, retrain
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, running, completed, failed
+    config TEXT NOT NULL,               -- JSON config completo
+    metrics TEXT,                       -- JSON métricas finales
+    logs TEXT,                          -- Logs de entrenamiento
+    started_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    duration_seconds INTEGER,
+    error_message TEXT,
+    triggered_by TEXT,                  -- scheduler, api, user
+    UNIQUE(model_name, version, started_at)
+);
+
+CREATE TABLE IF NOT EXISTS ab_experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    model_a_version_id INTEGER NOT NULL REFERENCES model_versions(id),
+    model_b_version_id INTEGER NOT NULL REFERENCES model_versions(id),
+    traffic_split REAL NOT NULL DEFAULT 0.5,  -- % tráfico a modelo B
+    status TEXT NOT NULL DEFAULT 'draft',  -- draft, running, paused, completed, stopped
+    start_date TEXT,
+    end_date TEXT,
+    min_sample_size INTEGER DEFAULT 1000,
+    confidence_level REAL DEFAULT 0.95,
+    primary_metric TEXT DEFAULT 'brier_score',  -- brier_score, log_loss, roi, sharpe
+    results TEXT,                       -- JSON con resultados
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(name)
+);
+
+CREATE TABLE IF NOT EXISTS feature_store (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feature_name TEXT NOT NULL,
+    feature_group TEXT NOT NULL,        -- team_stats, h2h, market, temporal, etc.
+    description TEXT,
+    data_type TEXT NOT NULL,            -- numeric, categorical, datetime
+    transformation TEXT,                -- JSON: normalization, encoding, etc.
+    importance_score REAL DEFAULT 0,    -- Feature importance global
+    last_computed TEXT,
+    is_active INTEGER DEFAULT 1,
+    UNIQUE(feature_name)
+);
+
+CREATE TABLE IF NOT EXISTS model_predictions_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_version_id INTEGER NOT NULL REFERENCES model_versions(id),
+    match_id TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    league TEXT NOT NULL,
+    kickoff TEXT NOT NULL,
+    market TEXT NOT NULL,
+    prediction TEXT NOT NULL,           -- JSON con probabilidades
+    actual_outcome TEXT,                -- Resultado real cuando disponible
+    confidence_score REAL,
+    created_at TEXT DEFAULT (datetime('now')),
+    settled_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_versions_name ON model_versions(model_name);
+CREATE INDEX IF NOT EXISTS idx_model_versions_champion ON model_versions(is_champion);
+CREATE INDEX IF NOT EXISTS idx_training_runs_model ON training_runs(model_name);
+CREATE INDEX IF NOT EXISTS idx_training_runs_status ON training_runs(status);
+CREATE INDEX IF NOT EXISTS idx_ab_experiments_status ON ab_experiments(status);
+CREATE INDEX IF NOT EXISTS idx_feature_store_group ON feature_store(feature_group);
+CREATE INDEX IF NOT EXISTS idx_predictions_log_model ON model_predictions_log(model_version_id);
+CREATE INDEX IF NOT EXISTS idx_predictions_log_match ON model_predictions_log(match_id);
 """
 
 
@@ -1008,3 +1099,247 @@ class Database:
                ORDER BY kickoff ASC""",
             (portfolio_id,),
         )
+
+    # ---------- ML Pipeline ----------
+    def save_model_version(self, model: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO model_versions
+               (model_name, version, parameters, metrics, training_data_hash,
+                artifact_path, status, is_champion, parent_version_id, deployed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                model.get("model_name"),
+                model.get("version"),
+                json.dumps(model.get("parameters", {})),
+                json.dumps(model.get("metrics", {})),
+                model.get("training_data_hash"),
+                model.get("artifact_path"),
+                model.get("status", "training"),
+                1 if model.get("is_champion") else 0,
+                model.get("parent_version_id"),
+                model.get("deployed_at"),
+            ),
+        )
+
+    def get_model_version(self, model_name: str, version: str) -> Optional[dict]:
+        row = self.query_one(
+            "SELECT * FROM model_versions WHERE model_name = ? AND version = ?",
+            (model_name, version),
+        )
+        if row:
+            row["parameters"] = json.loads(row["parameters"])
+            row["metrics"] = json.loads(row["metrics"])
+        return row
+
+    def get_champion_model(self, model_name: str) -> Optional[dict]:
+        row = self.query_one(
+            "SELECT * FROM model_versions WHERE model_name = ? AND is_champion = 1 AND status = 'deployed'",
+            (model_name,),
+        )
+        if row:
+            row["parameters"] = json.loads(row["parameters"])
+            row["metrics"] = json.loads(row["metrics"])
+        return row
+
+    def get_model_versions(self, model_name: str = None, status: str = None) -> List[dict]:
+        query = "SELECT * FROM model_versions WHERE 1=1"
+        params = []
+        if model_name:
+            query += " AND model_name = ?"
+            params.append(model_name)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["parameters"] = json.loads(row["parameters"])
+            row["metrics"] = json.loads(row["metrics"])
+        return rows
+
+    def promote_model(self, model_name: str, version: str) -> None:
+        # Despromover campeón actual
+        self.execute(
+            "UPDATE model_versions SET is_champion = 0 WHERE model_name = ? AND is_champion = 1",
+            (model_name,),
+        )
+        # Promover nuevo
+        self.execute(
+            "UPDATE model_versions SET is_champion = 1, status = 'deployed', deployed_at = datetime('now') WHERE model_name = ? AND version = ?",
+            (model_name, version),
+        )
+
+    def archive_model(self, model_name: str, version: str) -> None:
+        self.execute(
+            "UPDATE model_versions SET status = 'archived' WHERE model_name = ? AND version = ?",
+            (model_name, version),
+        )
+
+    def save_training_run(self, run: dict) -> int:
+        return self.execute(
+            """INSERT INTO training_runs
+               (model_name, version, run_type, status, config, metrics, logs, 
+                started_at, completed_at, duration_seconds, error_message, triggered_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run.get("model_name"),
+                run.get("version"),
+                run.get("run_type", "manual"),
+                run.get("status", "pending"),
+                json.dumps(run.get("config", {})),
+                json.dumps(run.get("metrics", {})) if run.get("metrics") else None,
+                run.get("logs"),
+                run.get("started_at"),
+                run.get("completed_at"),
+                run.get("duration_seconds"),
+                run.get("error_message"),
+                run.get("triggered_by"),
+            ),
+        )
+
+    def update_training_run(self, run_id: int, updates: dict) -> None:
+        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        params = list(updates.values()) + [run_id]
+        self.execute(f"UPDATE training_runs SET {set_clause} WHERE id = ?", tuple(params))
+
+    def get_training_runs(self, model_name: str = None, status: str = None, limit: int = 50) -> List[dict]:
+        query = "SELECT * FROM training_runs WHERE 1=1"
+        params = []
+        if model_name:
+            query += " AND model_name = ?"
+            params.append(model_name)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["config"] = json.loads(row["config"])
+            if row["metrics"]:
+                row["metrics"] = json.loads(row["metrics"])
+        return rows
+
+    def save_ab_experiment(self, exp: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO ab_experiments
+               (name, description, model_a_version_id, model_b_version_id,
+                traffic_split, status, start_date, end_date, min_sample_size,
+                confidence_level, primary_metric, results)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                exp.get("name"),
+                exp.get("description"),
+                exp.get("model_a_version_id"),
+                exp.get("model_b_version_id"),
+                exp.get("traffic_split", 0.5),
+                exp.get("status", "draft"),
+                exp.get("start_date"),
+                exp.get("end_date"),
+                exp.get("min_sample_size", 1000),
+                exp.get("confidence_level", 0.95),
+                exp.get("primary_metric", "brier_score"),
+                json.dumps(exp.get("results", {})),
+            ),
+        )
+
+    def get_ab_experiment(self, exp_id: int) -> Optional[dict]:
+        row = self.query_one("SELECT * FROM ab_experiments WHERE id = ?", (exp_id,))
+        if row:
+            row["results"] = json.loads(row["results"])
+        return row
+
+    def get_ab_experiments(self, status: str = None) -> List[dict]:
+        query = "SELECT * FROM ab_experiments WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC"
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["results"] = json.loads(row["results"])
+        return rows
+
+    def update_ab_experiment(self, exp_id: int, updates: dict) -> None:
+        if "results" in updates:
+            updates["results"] = json.dumps(updates["results"])
+        updates["updated_at"] = datetime.now().isoformat()
+        set_clause = ", ".join([f"{k} = ?" for k in updates.keys()])
+        params = list(updates.values()) + [exp_id]
+        self.execute(f"UPDATE ab_experiments SET {set_clause} WHERE id = ?", tuple(params))
+
+    def save_feature(self, feature: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO feature_store
+               (feature_name, feature_group, description, data_type, transformation, importance_score, last_computed, is_active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                feature.get("feature_name"),
+                feature.get("feature_group"),
+                feature.get("description"),
+                feature.get("data_type"),
+                json.dumps(feature.get("transformation", {})),
+                feature.get("importance_score", 0),
+                feature.get("last_computed"),
+                1 if feature.get("is_active", True) else 0,
+            ),
+        )
+
+    def get_features(self, feature_group: str = None, active_only: bool = True) -> List[dict]:
+        query = "SELECT * FROM feature_store WHERE 1=1"
+        params = []
+        if feature_group:
+            query += " AND feature_group = ?"
+            params.append(feature_group)
+        if active_only:
+            query += " AND is_active = 1"
+        query += " ORDER BY feature_group, importance_score DESC"
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["transformation"] = json.loads(row["transformation"])
+        return rows
+
+    def log_prediction(self, log: dict) -> int:
+        return self.execute(
+            """INSERT INTO model_predictions_log
+               (model_version_id, match_id, home_team, away_team, league, kickoff,
+                market, prediction, actual_outcome, confidence_score)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                log.get("model_version_id"),
+                log.get("match_id"),
+                log.get("home_team"),
+                log.get("away_team"),
+                log.get("league"),
+                log.get("kickoff"),
+                log.get("market"),
+                json.dumps(log.get("prediction", {})),
+                log.get("actual_outcome"),
+                log.get("confidence_score"),
+            ),
+        )
+
+    def update_prediction_outcome(self, match_id: str, model_version_id: int, actual_outcome: str) -> None:
+        self.execute(
+            """UPDATE model_predictions_log 
+               SET actual_outcome = ?, settled_at = datetime('now')
+               WHERE match_id = ? AND model_version_id = ?""",
+            (actual_outcome, match_id, model_version_id),
+        )
+
+    def get_prediction_logs(self, model_version_id: int = None, match_id: str = None, limit: int = 1000) -> List[dict]:
+        query = "SELECT * FROM model_predictions_log WHERE 1=1"
+        params = []
+        if model_version_id:
+            query += " AND model_version_id = ?"
+            params.append(model_version_id)
+        if match_id:
+            query += " AND match_id = ?"
+            params.append(match_id)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["prediction"] = json.loads(row["prediction"])
+        return rows

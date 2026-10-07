@@ -734,6 +734,67 @@ def run_scheduler():
         await scheduler.init_bot()
         await scheduler.risk_summary_job()
     
+    # ===================== ML PIPELINE JOBS =====================
+    
+    async def ml_retrain_task(self):
+        """Job semanal: reentrenamiento automático de modelos."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("🤖 ML Pipeline: iniciando reentrenamiento semanal...")
+        try:
+            from analyzers.ml_pipeline import create_ml_pipeline
+            pipeline = create_ml_pipeline(self.db)
+            
+            message = "🤖 <b>ML Pipeline - Reentrenamiento Semanal</b>\n\n"
+            results = {}
+            
+            # Reentrenar ensemble (principal)
+            result = pipeline.run_scheduled_retrain("ensemble")
+            results["ensemble"] = result
+            
+            status_emoji = "✅" if result.get("success") else "❌"
+            action = result.get("action", "unknown")
+            version = result.get("version", "N/A")
+            message += f"{status_emoji} <b>Ensemble</b>: v{version} - {action}\n"
+            
+            if result.get("success") and "metrics" in result:
+                m = result["metrics"]
+                message += f"   Brier: {m.get('brier_score', 0):.4f} | ROI: {m.get('roi', 0):.2%} | Sharpe: {m.get('sharpe', 0):.2f}\n"
+            
+            message += "\n"
+            
+            # Reentrenar modelos base (opcional, más rápido)
+            base_models = ["poisson", "dixon_coles", "elo", "pi_ratings"]
+            for model in base_models:
+                result = pipeline.run_scheduled_retrain(model)
+                results[model] = result
+                
+                status_emoji = "✅" if result.get("success") else "❌"
+                action = result.get("action", "unknown")
+                version = result.get("version", "N/A")
+                message += f"{status_emoji} <b>{model.title()}</b>: v{version} - {action}\n"
+            
+            await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("✅ ML Pipeline: reentrenamiento semanal completado")
+            
+        except Exception as e:
+            logger.error(f"Error en ML pipeline retrain: {e}")
+
+    async def ml_retrain_job(self):
+        """Wrapper para job programado."""
+        await self.init_bot()
+        await self.ml_retrain_task()
+
+    # Standalone function for scheduler
+    async def ml_retrain_task():
+        await scheduler.init_bot()
+        await scheduler.ml_retrain_task()
+
     print("\n" + "=" * 50)
     print("SCHEDULER CONFIGURADO")
     print("=" * 50)
@@ -746,6 +807,7 @@ def run_scheduler():
     print("📊 Paper Trading resumen: 07:00 AM")
     print("🛡️ Risk Management monitoring: cada 15 min")
     print("🛡️ Risk Management resumen: 06:00 AM")
+    print("🤖 ML Pipeline retrain: domingos 03:00 AM")
     print("=" * 50)
     print("También puedes ejecutar la tarea diaria manualmente ahora.\n")
     
@@ -763,6 +825,7 @@ def run_scheduler():
     schedule.every().day.at("07:00").do(lambda: asyncio.run(paper_summary_task()))
     schedule.every(15).minutes.do(lambda: asyncio.run(risk_monitoring_task()))
     schedule.every().day.at("06:00").do(lambda: asyncio.run(risk_summary_task()))
+    schedule.every().sunday.at("03:00").do(lambda: asyncio.run(ml_retrain_task()))
     
     print("\nScheduler ejecutándose. Presiona Ctrl+C para detener.")
     while True:

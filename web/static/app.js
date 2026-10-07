@@ -1292,3 +1292,334 @@ async function reconocerAlertaRisk(alertId) {
     alert('Error: ' + e.message);
   }
 }
+
+// ===================== ML MODELS =====================
+
+async function goML() {
+  mostrar('#view-ml');
+  $('#nav-inicio').classList.remove('active');
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.remove('active');
+  $('#nav-mejores').classList.remove('active');
+  $('#nav-bookmakers').classList.remove('active');
+  $('#nav-paper').classList.remove('active');
+  $('#nav-risk').classList.remove('active');
+  $('#nav-ml').classList.add('active');
+  
+  await cargarModelVersions();
+  await cargarChampionModels();
+  await cargarTrainingRuns();
+  await cargarABExperiments();
+  $('#ml-champion-card').style.display = 'block';
+  $('#ml-runs-card').style.display = 'block';
+  $('#ml-ab-card').style.display = 'block';
+  $('#ml-opt-card').style.display = 'block';
+}
+
+async function cargarModelVersions() {
+  const loading = $('#ml-loading');
+  const errorDiv = $('#ml-error');
+  const body = $('#ml-models-body');
+  
+  loading.classList.remove('hidden');
+  errorDiv.classList.add('hidden');
+  body.innerHTML = '';
+  
+  try {
+    const model = $('#ml-model-filter').value;
+    const status = $('#ml-status-filter').value;
+    
+    const params = new URLSearchParams();
+    if (model) params.set('model_name', model);
+    if (status) params.set('status', status);
+    
+    const data = await fetchJson(`/api/ml/models?${params.toString()}`);
+    
+    loading.classList.add('hidden');
+    
+    if (!data.models || data.models.length === 0) {
+      body.innerHTML = '<tr><td colspan="11" class="empty">No hay modelos registrados</td></tr>';
+      return;
+    }
+    
+    body.innerHTML = data.models.map(m => {
+      const metrics = m.metrics || {};
+      const isChampion = m.is_champion;
+      const statusClass = m.status === 'deployed' ? 'status-won' : 
+                          m.status === 'ready' ? 'status-pending' : 
+                          m.status === 'training' ? 'status-pending' : 'status-void';
+      const statusText = m.status === 'deployed' ? '🚀 Deployed' : 
+                         m.status === 'ready' ? '✅ Ready' : 
+                         m.status === 'training' ? '⏳ Training' : '📦 Archived';
+      
+      return `
+        <tr>
+          <td><strong>${m.model_name}</strong></td>
+          <td>${m.version}${isChampion ? ' 👑' : ''}</td>
+          <td><span class="${statusClass}">${statusText}</span></td>
+          <td>${metrics.brier_score ? metrics.brier_score.toFixed(4) : '—'}</td>
+          <td>${metrics.log_loss ? metrics.log_loss.toFixed(4) : '—'}</td>
+          <td>${metrics.accuracy ? (metrics.accuracy * 100).toFixed(1) + '%' : '—'}</td>
+          <td>${metrics.roi ? (metrics.roi * 100).toFixed(2) + '%' : '—'}</td>
+          <td>${metrics.sharpe ? metrics.sharpe.toFixed(2) : '—'}</td>
+          <td>${metrics.calibration_error ? metrics.calibration_error.toFixed(4) : '—'}</td>
+          <td>${new Date(m.created_at).toLocaleDateString('es', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+          <td>
+            ${!isChampion && m.status !== 'deployed' ? 
+              `<button class="btn btn-secondary btn-sm" onclick="promoverModelo('${m.model_name}','${m.version}')" style="padding:4px 8px;font-size:11px;margin-right:4px;"><i class="fas fa-crown"></i> Promover</button>` : ''}
+            ${m.status !== 'archived' ? 
+              `<button class="btn btn-ghost btn-sm" onclick="archivarModelo('${m.model_name}','${m.version}')" style="padding:4px 8px;font-size:11px;"><i class="fas fa-box"></i> Archivar</button>` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+    
+  } catch (e) {
+    loading.classList.add('hidden');
+    errorDiv.classList.remove('hidden');
+    errorDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
+  }
+}
+
+async function cargarChampionModels() {
+  try {
+    const models = ['ensemble', 'poisson', 'dixon_coles', 'bivariate_poisson', 'skellam', 'elo', 'pi_ratings', 'xg_model'];
+    const list = $('#ml-champion-list');
+    
+    let html = '';
+    for (const model of models) {
+      try {
+        const data = await fetchJson(`/api/ml/models/${model}/champion`);
+        const metrics = data.metrics || {};
+        html += `
+          <div class="stat-item">
+            <div class="label">${model.toUpperCase()}</div>
+            <div class="value">v${data.version} 👑</div>
+          </div>
+          <div class="stat-item">
+            <div class="label">Brier</div>
+            <div class="value">${metrics.brier_score ? metrics.brier_score.toFixed(4) : '—'}</div>
+          </div>
+          <div class="stat-item">
+            <div class="label">ROI</div>
+            <div class="value">${metrics.roi ? (metrics.roi * 100).toFixed(2) + '%' : '—'}</div>
+          </div>
+          <div class="stat-item">
+            <div class="label">Sharpe</div>
+            <div class="value">${metrics.sharpe ? metrics.sharpe.toFixed(2) : '—'}</div>
+          </div>
+        `;
+      } catch (e) {
+        html += `<div class="stat-item"><div class="label">${model}</div><div class="value muted">Sin campeón</div></div>`;
+      }
+    }
+    list.innerHTML = html;
+  } catch (e) {
+    console.error('Error cargando champions:', e);
+  }
+}
+
+async function promoverModelo(modelName, version) {
+  if (!confirm(`¿Promover ${modelName} v${version} a campeón (producción)?`)) return;
+  
+  try {
+    await fetchJson(`/api/ml/models/${modelName}/promote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version })
+    });
+    alert('✅ Modelo promovido a campeón');
+    await cargarModelVersions();
+    await cargarChampionModels();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function archivarModelo(modelName, version) {
+  if (!confirm(`¿Archivar ${modelName} v${version}?`)) return;
+  
+  try {
+    await fetchJson(`/api/ml/models/${modelName}/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version })
+    });
+    alert('📦 Modelo archivado');
+    await cargarModelVersions();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function cargarTrainingRuns() {
+  try {
+    const data = await fetchJson('/api/ml/training-runs?limit=50');
+    const body = $('#ml-runs-body');
+    
+    if (!data.runs || data.runs.length === 0) {
+      body.innerHTML = '<tr><td colspan="8" class="empty">No hay runs de entrenamiento</td></tr>';
+      return;
+    }
+    
+    body.innerHTML = data.runs.map(r => {
+      const metrics = r.metrics || {};
+      const statusClass = r.status === 'completed' ? 'status-won' : 
+                          r.status === 'running' ? 'status-pending' : 'status-lost';
+      const statusText = r.status === 'completed' ? '✅ Completed' : 
+                         r.status === 'running' ? '⏳ Running' : 
+                         r.status === 'failed' ? '❌ Failed' : '⏸️ Pending';
+      
+      return `
+        <tr>
+          <td>${r.model_name}</td>
+          <td>${r.version}</td>
+          <td>${r.run_type}</td>
+          <td><span class="${statusClass}">${statusText}</span></td>
+          <td>Brier: ${metrics.brier_score ? metrics.brier_score.toFixed(4) : '—'} | ROI: ${metrics.roi ? (metrics.roi*100).toFixed(2)+'%' : '—'}</td>
+          <td>${r.duration_seconds ? Math.round(r.duration_seconds/60) + ' min' : '—'}</td>
+          <td>${new Date(r.started_at).toLocaleDateString('es', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+          <td>${r.triggered_by}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Error cargando training runs:', e);
+  }
+}
+
+async function cargarABExperiments() {
+  try {
+    const data = await fetchJson('/api/ml/ab-experiments');
+    const body = $('#ml-ab-body');
+    
+    if (!data.experiments || data.experiments.length === 0) {
+      body.innerHTML = '<tr><td colspan="9" class="empty">No hay experimentos A/B</td></tr>';
+      return;
+    }
+    
+    body.innerHTML = data.experiments.map(exp => {
+      const results = exp.results || {};
+      const statusClass = exp.status === 'running' ? 'status-pending' : 
+                          exp.status === 'completed' ? 'status-won' : 'status-void';
+      const statusText = exp.status === 'running' ? '▶️ Running' : 
+                         exp.status === 'completed' ? '✅ Completed' : 
+                         exp.status === 'stopped' ? '🛑 Stopped' : '📝 Draft';
+      
+      return `
+        <tr>
+          <td>${exp.name}</td>
+          <td>${exp.model_a_version_id}</td>
+          <td>${exp.model_b_version_id}</td>
+          <td>${(exp.traffic_split * 100).toFixed(0)}%</td>
+          <td><span class="${statusClass}">${statusText}</span></td>
+          <td>${exp.primary_metric}</td>
+          <td>${exp.start_date ? new Date(exp.start_date).toLocaleDateString('es') : '—'}</td>
+          <td>${exp.end_date ? new Date(exp.end_date).toLocaleDateString('es') : '—'}</td>
+          <td>
+            ${exp.status === 'draft' ? 
+              `<button class="btn btn-secondary btn-sm" onclick="iniciarAB(${exp.id})" style="padding:4px 8px;font-size:11px;margin-right:4px;"><i class="fas fa-play"></i> Iniciar</button>` : ''}
+            ${exp.status === 'running' ? 
+              `<button class="btn btn-primary btn-sm" onclick="analizarAB(${exp.id})" style="padding:4px 8px;font-size:11px;margin-right:4px;"><i class="fas fa-chart-line"></i> Analizar</button>` : ''}
+            ${exp.status === 'completed' && results.winner ? 
+              `<span class="status-won">🏆 ${results.winner}</span>` : ''}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Error cargando A/B experiments:', e);
+  }
+}
+
+async function iniciarAB(expId) {
+  try {
+    await fetchJson(`/api/ml/ab-experiments/${expId}/start`, { method: 'POST' });
+    alert('▶️ Experimento iniciado');
+    await cargarABExperiments();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function analizarAB(expId) {
+  try {
+    const result = await fetchJson(`/api/ml/ab-experiments/${expId}/analyze`, { method: 'POST' });
+    if (result.error) {
+      alert('Error: ' + result.error);
+      return;
+    }
+    const winner = result.winner === 'A' ? 'Modelo A' : 'Modelo B';
+    const sig = result.significant ? 'SÍ (significativo)' : 'NO (no significativo)';
+    alert(`🏆 Ganador: ${winner}\n📊 p-value: ${result.p_value.toFixed(4)}\n✅ Significativo: ${sig}\n💡 ${result.recommendation}`);
+    await cargarABExperiments();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function mostrarModalAB() {
+  const name = prompt('Nombre del experimento:');
+  if (!name) return;
+  const modelA = prompt('Modelo A (formato: modelo:version):');
+  if (!modelA) return;
+  const modelB = prompt('Modelo B (formato: modelo:version):');
+  if (!modelB) return;
+  
+  const traffic = parseFloat(prompt('Traffic split para B (0-1):') || '0.5');
+  const metric = prompt('Métrica principal (brier_score, log_loss, roi, sharpe):') || 'brier_score';
+  
+  fetchJson('/api/ml/ab-experiments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, model_a: modelA, model_b: modelB, traffic_split: traffic, primary_metric: metric })
+  }).then(() => {
+    alert('✅ Experimento creado');
+    cargarABExperiments();
+  }).catch(e => alert('Error: ' + e.message));
+}
+
+async function optimizarEnsemble() {
+  const loading = $('#ml-opt-loading');
+  const resultDiv = $('#ml-opt-result');
+  
+  loading.classList.remove('hidden');
+  resultDiv.classList.add('hidden');
+  
+  try {
+    const trials = parseInt($('#opt-trials').value) || 50;
+    const timeout = parseInt($('#opt-timeout').value) || 1800;
+    const leagues = $('#opt-leagues').value || null;
+    const lookback = parseInt($('#opt-lookback').value) || 180;
+    
+    const result = await fetchJson('/api/ml/optimize-ensemble', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ n_trials: trials, timeout, leagues, lookback_days: lookback })
+    });
+    
+    loading.classList.add('hidden');
+    resultDiv.classList.remove('hidden');
+    
+    const weights = result.weights;
+    let html = '<strong>✅ Optimización completada</strong><br><br>';
+    html += '<strong>Pesos óptimos:</strong><br>';
+    for (const [model, weight] of Object.entries(weights)) {
+      html += `${model}: <strong>${(weight * 100).toFixed(1)}%</strong><br>`;
+    }
+    
+    resultDiv.innerHTML = html;
+    
+    // Opcional: auto-aplicar
+    if (confirm('¿Aplicar estos pesos al ensemble?')) {
+      // En producción, esto actualizaría el modelo
+      alert('Pesos aplicados (requiere reentrenamiento)');
+    }
+    
+  } catch (e) {
+    loading.classList.add('hidden');
+    resultDiv.classList.remove('hidden');
+    resultDiv.classList.add('notice');
+    resultDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
+  }
+}

@@ -2109,3 +2109,183 @@ def init_default_risk_limits(portfolio_id: int):
     count = rm.set_default_limits(portfolio_id)
     
     return {"success": True, "limits_created": count}
+
+
+# ===================== ML PIPELINE ENDPOINTS =====================
+
+@app.get("/api/ml/models")
+def list_model_versions(model_name: str = None, status: str = None):
+    """Lista versiones de modelos registradas."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    versions = pipeline.registry.get_model_versions(model_name, status)
+    return {"models": versions, "count": len(versions)}
+
+
+@app.get("/api/ml/models/{model_name}/champion")
+def get_champion_model(model_name: str):
+    """Obtiene el modelo campeón (en producción) para un modelo."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    champion = pipeline.registry.db.get_champion_model(model_name)
+    if not champion:
+        raise HTTPException(404, detail=f"No hay campeón para {model_name}")
+    
+    return champion
+
+
+@app.get("/api/ml/models/{model_name}/lineage")
+def get_model_lineage(model_name: str, version: str):
+    """Obtiene el lineage (historial de versiones) de un modelo."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    lineage = pipeline.registry.get_lineage(model_name, version)
+    return {"model_name": model_name, "version": version, "lineage": lineage}
+
+
+@app.get("/api/ml/models/compare")
+def compare_model_versions(model_name: str, version_a: str, version_b: str):
+    """Compara dos versiones del mismo modelo."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    comparison = pipeline.registry.compare_versions(model_name, version_a, version_b)
+    return comparison
+
+
+@app.post("/api/ml/models/{model_name}/promote")
+def promote_model(model_name: str, version: str):
+    """Promueve una versión a campeón (producción)."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    pipeline.registry.promote_to_champion(model_name, version)
+    return {"success": True, "model_name": model_name, "version": version, "status": "champion"}
+
+
+@app.post("/api/ml/models/{model_name}/archive")
+def archive_model(model_name: str, version: str):
+    """Archiva una versión del modelo."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    pipeline.registry.archive_model(model_name, version)
+    return {"success": True, "model_name": model_name, "version": version, "status": "archived"}
+
+
+@app.get("/api/ml/training-runs")
+def list_training_runs(model_name: str = None, status: str = None, limit: int = 50):
+    """Lista runs de entrenamiento."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    runs = pipeline.registry.db.get_training_runs(model_name, status, limit)
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.post("/api/ml/retrain")
+def trigger_retrain(model_name: str = "ensemble", run_type: str = "manual"):
+    """Dispara reentrenamiento manual de un modelo."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    result = pipeline.run_scheduled_retrain(model_name)
+    return result
+
+
+@app.post("/api/ml/retrain-all")
+def trigger_retrain_all():
+    """Reentrena todos los modelos."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    results = pipeline.retrain_all_models()
+    return {"results": results}
+
+
+@app.post("/api/ml/optimize-ensemble")
+def optimize_ensemble_weights(n_trials: int = 50, timeout: int = 1800, 
+                               leagues: str = None, lookback_days: int = 180):
+    """Optimiza pesos del ensemble con Optuna."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    league_list = leagues.split(",") if leagues else None
+    weights = pipeline.tuner.optimize_ensemble_weights(
+        n_trials=n_trials,
+        timeout=timeout,
+        leagues=league_list,
+        lookback_days=lookback_days,
+    )
+    
+    return {"weights": weights, "trials": n_trials, "timeout": timeout}
+
+
+# A/B Testing Endpoints
+@app.post("/api/ml/ab-experiments")
+def create_ab_experiment(name: str, model_a: str, model_b: str,
+                          traffic_split: float = 0.5, min_sample_size: int = 1000,
+                          primary_metric: str = "brier_score"):
+    """Crea un experimento A/B (model_a y model_b en formato 'model:version')."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    exp_id = pipeline.ab_framework.create_experiment(
+        name, model_a, model_b, traffic_split, min_sample_size, primary_metric
+    )
+    return {"success": True, "experiment_id": exp_id}
+
+
+@app.get("/api/ml/ab-experiments")
+def list_ab_experiments(status: str = None):
+    """Lista experimentos A/B."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    experiments = pipeline.ab_framework.db.get_ab_experiments(status)
+    return {"experiments": experiments, "count": len(experiments)}
+
+
+@app.get("/api/ml/ab-experiments/{exp_id}")
+def get_ab_experiment(exp_id: int):
+    """Obtiene detalle de un experimento A/B."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    exp = pipeline.ab_framework.db.get_ab_experiment(exp_id)
+    if not exp:
+        raise HTTPException(404, detail="Experimento no encontrado")
+    return exp
+
+
+@app.post("/api/ml/ab-experiments/{exp_id}/start")
+def start_ab_experiment(exp_id: int):
+    """Inicia un experimento A/B."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    pipeline.ab_framework.start_experiment(exp_id)
+    return {"success": True, "experiment_id": exp_id, "status": "running"}
+
+
+@app.post("/api/ml/ab-experiments/{exp_id}/analyze")
+def analyze_ab_experiment(exp_id: int):
+    """Analiza resultados de un experimento A/B."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    results = pipeline.ab_framework.analyze_experiment(exp_id)
+    return results
+
+
+@app.get("/api/ml/features")
+def list_features(feature_group: str = None):
+    """Lista features del feature store."""
+    from analyzers.ml_pipeline import create_ml_pipeline
+    pipeline = create_ml_pipeline(_get_db())
+    
+    features = pipeline.registry.db.get_features(feature_group)
+    return {"features": features, "count": len(features)}
