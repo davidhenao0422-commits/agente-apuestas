@@ -517,6 +517,92 @@ class BettingScheduler:
         except Exception as e:
             logger.error(f"Error actualizando bookmaker scores: {e}")
 
+    # ===================== PAPER TRADING JOBS =====================
+
+    async def paper_trading_settle_job(self):
+        """Job: intenta liquidar picks de paper trading de partidos finalizados."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("📝 Paper Trading: verificando picks pendientes...")
+        try:
+            from analyzers.paper_trading import create_paper_trading_engine
+            engine = create_paper_trading_engine(self.db)
+            
+            # Obtener todos los portfolios activos
+            portfolios = self.db.get_all_portfolios()
+            active_portfolios = [p for p in portfolios if p.get("is_active")]
+            
+            total_settled = 0
+            total_voided = 0
+            messages = []
+            
+            for portfolio in active_portfolios:
+                result = engine.auto_settle_pending(portfolio["id"])
+                total_settled += result.get("settled", 0)
+                total_voided += result.get("voided", 0)
+                
+                if result.get("voided", 0) > 0:
+                    messages.append(f"📋 {portfolio['name']}: {result['voided']} picks anulados (sin resultado)")
+            
+            if messages and self.bot and self.channel_id:
+                message = "📝 <b>Paper Trading - Auto Settlement</b>\n\n" + "\n".join(messages)
+                await self.bot.send_message(
+                    chat_id=self.channel_id,
+                    text=message,
+                    parse_mode="HTML"
+                )
+            
+            logger.info(f"✅ Paper Trading: {total_settled} liquidados, {total_voided} anulados")
+            
+        except Exception as e:
+            logger.error(f"Error en paper trading settlement: {e}")
+
+    async def paper_trading_summary_job(self):
+        """Job diario: resumen de performance de paper trading."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("📊 Paper Trading: generando resumen diario...")
+        try:
+            from analyzers.paper_trading import create_paper_trading_engine
+            engine = create_paper_trading_engine(self.db)
+            
+            portfolios = self.db.get_all_portfolios()
+            active_portfolios = [p for p in portfolios if p.get("is_active")]
+            
+            if not active_portfolios:
+                return
+            
+            message = "📊 <b>Paper Trading - Resumen Diario</b>\n\n"
+            
+            for portfolio in active_portfolios[:5]:  # Top 5 portfolios
+                perf = engine.get_performance(portfolio["id"], days=1)
+                summary = engine.get_performance_summary(portfolio["id"])
+                
+                roi_30 = summary.get("30d", {}).get("roi", 0)
+                pnl_30 = summary.get("30d", {}).get("pnl", 0)
+                picks_30 = summary.get("30d", {}).get("picks", 0)
+                
+                roi_emoji = "🟢" if roi_30 >= 0 else "🔴"
+                pnl_emoji = "🟢" if pnl_30 >= 0 else "🔴"
+                
+                message += (
+                    f"{roi_emoji} <b>{portfolio['name']}</b>\n"
+                    f"   Bankroll: {portfolio['current_bankroll']:.2f}€ ({summary.get('total_return_pct', 0):+.2f}%)\n"
+                    f"   30d: {picks_30} picks | ROI: {roi_30:+.2f}% | P&L: {pnl_30:+.2f}€\n\n"
+                )
+            
+            await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("✅ Paper Trading: resumen diario enviado")
+            
+        except Exception as e:
+            logger.error(f"Error generando resumen paper trading: {e}")
+
 
 def run_scheduler():
     scheduler = BettingScheduler()
@@ -544,6 +630,14 @@ def run_scheduler():
         await scheduler.init_bot()
         await scheduler.update_bookmaker_scores_job()
     
+    async def paper_settle_task():
+        await scheduler.init_bot()
+        await scheduler.paper_trading_settle_job()
+    
+    async def paper_summary_task():
+        await scheduler.init_bot()
+        await scheduler.paper_trading_summary_job()
+    
     print("\n" + "=" * 50)
     print("SCHEDULER CONFIGURADO")
     print("=" * 50)
@@ -552,6 +646,8 @@ def run_scheduler():
     print("⚡ Detección steam moves: cada 15 min")
     print("📈 Resumen steam diario: 23:00")
     print("📊 Ranking bookmakers: 02:00 AM")
+    print("📝 Paper Trading settlement: cada 30 min")
+    print("📊 Paper Trading resumen: 07:00 AM")
     print("=" * 50)
     print("También puedes ejecutar la tarea diaria manualmente ahora.\n")
     
@@ -565,6 +661,8 @@ def run_scheduler():
     schedule.every(15).minutes.do(lambda: asyncio.run(steam_detection_task()))
     schedule.every().day.at("23:00").do(lambda: asyncio.run(steam_summary_task()))
     schedule.every().day.at("02:00").do(lambda: asyncio.run(bookmaker_scores_task()))
+    schedule.every(30).minutes.do(lambda: asyncio.run(paper_settle_task()))
+    schedule.every().day.at("07:00").do(lambda: asyncio.run(paper_summary_task()))
     
     print("\nScheduler ejecutándose. Presiona Ctrl+C para detener.")
     while True:

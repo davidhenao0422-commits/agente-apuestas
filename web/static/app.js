@@ -557,10 +557,377 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#nav-proximos').addEventListener('click', goProximos);
   $('#nav-mejores').addEventListener('click', goMejores);
   $('#nav-bookmakers').addEventListener('click', goBookmakers);
+  $('#nav-paper').addEventListener('click', goPaper);
   
   // Cargar ligas para el selector de bookmakers
   cargarLigasBookmakers();
 });
+
+// ===================== BOOKMAKERS RANKING =====================
+// ... existing bookmakers code ...
+
+// ===================== PAPER TRADING =====================
+
+let paperPortfolioId = null;
+
+async function goPaper() {
+  mostrar('#view-paper');
+  $('#nav-inicio').classList.remove('active');
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.remove('active');
+  $('#nav-mejores').classList.remove('active');
+  $('#nav-bookmakers').classList.remove('active');
+  $('#nav-paper').classList.add('active');
+  
+  await cargarPaperPortfolio();
+  await cargarPaperPicks();
+}
+
+async function cargarPaperPortfolio() {
+  try {
+    const data = await fetchJson('/api/paper/portfolios');
+    
+    if (data.portfolios && data.portfolios.length > 0) {
+      // Usar el primero activo
+      const active = data.portfolios.find(p => p.is_active) || data.portfolios[0];
+      paperPortfolioId = active.id;
+      mostrarPaperPortfolio(active);
+      await cargarPaperPerformance(paperPortfolioId);
+    } else {
+      // Crear portfolio por defecto
+      await crearPortfolioPorDefecto();
+    }
+  } catch (e) {
+    console.error('Error cargando portfolio:', e);
+  }
+}
+
+function mostrarPaperPortfolio(p) {
+  const info = $('#paper-portfolio-info');
+  const initial = parseFloat(p.initial_bankroll);
+  const current = parseFloat(p.current_bankroll);
+  const totalReturn = ((current - initial) / initial * 100).toFixed(2);
+  const returnClass = totalReturn >= 0 ? 'value' : 'value edge-baja';
+  
+  info.innerHTML = `
+    <div class="stat-item"><div class="label">Portfolio</div><div class="value">${p.name}</div></div>
+    <div class="stat-item"><div class="label">Inicial</div><div class="value">${initial.toFixed(2)} ${p.currency}</div></div>
+    <div class="stat-item"><div class="label">Actual</div><div class="value">${current.toFixed(2)} ${p.currency}</div></div>
+    <div class="stat-item"><div class="label">Retorno Total</div><div class="value ${returnClass}">${totalReturn >= 0 ? '+' : ''}${totalReturn}%</div></div>
+    <div class="stat-item"><div class="label">Kelly</div><div class="value">${(p.kelly_fraction*100).toFixed(0)}%</div></div>
+    <div class="stat-item"><div class="label">Max Bet</div><div class="value">${(p.max_bet_pct*100).toFixed(0)}%</div></div>
+  `;
+  
+  $('#paper-kelly-select').value = p.kelly_fraction;
+  $('#paper-maxbet-select').value = p.max_bet_pct;
+  
+  $('#paper-perf-card').style.display = 'block';
+  $('#paper-period-card').style.display = 'block';
+  $('#paper-history-card').style.display = 'block';
+}
+
+async function crearPortfolioPorDefecto() {
+  try {
+    const data = await fetchJson('/api/paper/portfolios', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Default', initial_bankroll: 1000 })
+    });
+    if (data.portfolio) {
+      paperPortfolioId = data.portfolio.id;
+      mostrarPaperPortfolio(data.portfolio);
+      await cargarPaperPerformance(paperPortfolioId);
+    }
+  } catch (e) {
+    console.error('Error creando portfolio:', e);
+  }
+}
+
+async function crearNuevoPortfolio() {
+  const name = prompt('Nombre del portfolio:') || 'Portfolio ' + Date.now();
+  const bankroll = parseFloat(prompt('Bankroll inicial (€):') || '1000');
+  
+  try {
+    const data = await fetchJson('/api/paper/portfolios', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, initial_bankroll: bankroll })
+    });
+    if (data.portfolio) {
+      paperPortfolioId = data.portfolio.id;
+      mostrarPaperPortfolio(data.portfolio);
+      await cargarPaperPerformance(paperPortfolioId);
+      await cargarPaperPicks();
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function actualizarPaperSettings() {
+  if (!paperPortfolioId) return;
+  
+  const kelly = parseFloat($('#paper-kelly-select').value);
+  const maxbet = parseFloat($('#paper-maxbet-select').value);
+  
+  try {
+    await fetchJson(`/api/paper/portfolios/${paperPortfolioId}/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kelly_fraction: kelly, max_bet_pct: maxbet })
+    });
+    await cargarPaperPortfolio();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function cargarPaperPerformance(portfolioId) {
+  try {
+    const data = await fetchJson(`/api/paper/portfolios/${portfolioId}/performance?days=30`);
+    const perf = data.performance;
+    const summary = data.summary;
+    
+    // Performance summary
+    const perfHtml = `
+      <div class="stat-item"><div class="label">Picks (30d)</div><div class="value">${perf.total_picks}</div></div>
+      <div class="stat-item"><div class="label">ROI (30d)</div><div class="value ${perf.roi_pct >= 0 ? '' : 'edge-baja'}">${perf.roi_pct >= 0 ? '+' : ''}${perf.roi_pct.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Win Rate</div><div class="value">${perf.win_rate.toFixed(1)}%</div></div>
+      <div class="stat-item"><div class="label">P&L (30d)</div><div class="value ${perf.total_pnl >= 0 ? '' : 'edge-baja'}">${perf.total_pnl >= 0 ? '+' : ''}${perf.total_pnl.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">Sharpe</div><div class="value">${perf.sharpe.toFixed(2)}</div></div>
+      <div class="stat-item"><div class="label">Max DD</div><div class="value edge-baja">${perf.max_drawdown.toFixed(2)}€</div></div>
+    `;
+    $('#paper-perf-summary').innerHTML = perfHtml;
+    
+    // Period table
+    const periods = ['7d', '30d', '90d', '1y', 'all'];
+    const periodLabels = ['7 días', '30 días', '90 días', '1 año', 'Todo'];
+    let tableHtml = '';
+    
+    periods.forEach((p, i) => {
+      const s = summary[p];
+      const roiClass = s.roi >= 0 ? '' : 'edge-baja';
+      const pnlClass = s.pnl >= 0 ? '' : 'edge-baja';
+      tableHtml += `
+        <tr>
+          <td><strong>${periodLabels[i]}</strong></td>
+          <td>${s.picks}</td>
+          <td class="${roiClass}">${s.roi >= 0 ? '+' : ''}${s.roi.toFixed(2)}%</td>
+          <td>${s.win_rate.toFixed(1)}%</td>
+          <td class="${pnlClass}">${s.pnl >= 0 ? '+' : ''}${s.pnl.toFixed(2)}€</td>
+          <td>${s.sharpe.toFixed(2)}</td>
+          <td class="edge-baja">${s.max_dd.toFixed(2)}€</td>
+        </tr>
+      `;
+    });
+    $('#paper-period-body').innerHTML = tableHtml;
+    
+    // By market
+    if (perf.by_market) {
+      let marketHtml = '<h4 style="margin:16px 0 8px;color:var(--accent)"><i class="fas fa-list"></i> Por Mercado</h4>';
+      marketHtml += '<div class="stats-grid">';
+      for (const [market, stats] of Object.entries(perf.by_market)) {
+        const roiClass = stats.roi >= 0 ? '' : 'edge-baja';
+        marketHtml += `
+          <div class="stat-item">
+            <div class="label">${market.toUpperCase()}</div>
+            <div class="value">${stats.picks} picks | WR: ${stats.win_rate}% | ROI: <span class="${roiClass}">${stats.roi >= 0 ? '+' : ''}${stats.roi}%</span></div>
+          </div>
+        `;
+      }
+      marketHtml += '</div>';
+      $('#paper-perf-summary').innerHTML += marketHtml;
+    }
+    
+    // By league
+    if (perf.by_league) {
+      let leagueHtml = '<h4 style="margin:16px 0 8px;color:var(--accent)"><i class="fas fa-trophy"></i> Por Liga</h4>';
+      leagueHtml += '<div class="stats-grid">';
+      for (const [league, stats] of Object.entries(perf.by_league)) {
+        const roiClass = stats.roi >= 0 ? '' : 'edge-baja';
+        leagueHtml += `
+          <div class="stat-item">
+            <div class="label">${league}</div>
+            <div class="value">${stats.picks} picks | WR: ${stats.win_rate}% | ROI: <span class="${roiClass}">${stats.roi >= 0 ? '+' : ''}${stats.roi}%</span></div>
+          </div>
+        `;
+      }
+      leagueHtml += '</div>';
+      $('#paper-perf-summary').innerHTML += leagueHtml;
+    }
+    
+  } catch (e) {
+    console.error('Error cargando performance:', e);
+  }
+}
+
+async function cargarPaperPicks() {
+  if (!paperPortfolioId) return;
+  
+  const status = $('#paper-status-filter').value || null;
+  
+  try {
+    const data = await fetchJson(`/api/paper/portfolios/${paperPortfolioId}/picks?status=${status || ''}&limit=100`);
+    
+    const body = $('#paper-picks-body');
+    if (!data.picks || data.picks.length === 0) {
+      body.innerHTML = '<tr><td colspan="10" class="empty">No hay picks</td></tr>';
+      return;
+    }
+    
+    body.innerHTML = data.picks.map(pick => {
+      const date = new Date(pick.placed_at);
+      const dateStr = date.toLocaleDateString('es', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      
+      let statusClass = '';
+      let statusText = pick.status;
+      if (pick.status === 'pending') { statusClass = 'status-pending'; statusText = '⏳ Pendiente'; }
+      else if (pick.status === 'won') { statusClass = 'status-won'; statusText = '✅ Ganado'; }
+      else if (pick.status === 'lost') { statusClass = 'status-lost'; statusText = '❌ Perdido'; }
+      else if (pick.status === 'void') { statusClass = 'status-void'; statusText = '⚪ Anulado'; }
+      else if (pick.status === 'settled') { statusClass = 'status-settled'; statusText = pick.result === 'win' ? '✅ Ganado' : pick.result === 'loss' ? '❌ Perdido' : '⚪ Push'; }
+      else if (pick.status === 'cancelled') { statusClass = 'status-void'; statusText = '🚫 Cancelado'; }
+      
+      const pnlClass = pick.pnl !== null && pick.pnl !== undefined 
+        ? (pick.pnl >= 0 ? 'value' : 'value edge-baja') 
+        : '';
+      const pnlText = pick.pnl !== null && pick.pnl !== undefined 
+        ? (pick.pnl >= 0 ? '+' : '') + pick.pnl.toFixed(2) + '€' 
+        : '—';
+      
+      let actionsHtml = '';
+      if (pick.status === 'pending') {
+        actionsHtml = `<button class="btn btn-secondary btn-sm" onclick="liquidarPaperPick(${pick.id})" style="padding:4px 8px;font-size:11px;margin-right:4px;"><i class="fas fa-check"></i> Liquidar</button>
+          <button class="btn btn-ghost btn-sm" onclick="cancelarPaperPick(${pick.id})" style="padding:4px 8px;font-size:11px;"><i class="fas fa-times"></i> Cancelar</button>`;
+      } else {
+        actionsHtml = '—';
+      }
+      
+      return `
+        <tr>
+          <td>${dateStr}</td>
+          <td>${pick.home_team} vs ${pick.away_team}</td>
+          <td>${pick.league}</td>
+          <td><span class="mejor-market">${pick.market}</span></td>
+          <td><strong>${pick.choice}</strong></td>
+          <td>${parseFloat(pick.odds).toFixed(2)}</td>
+          <td>${parseFloat(pick.stake_units).toFixed(2)}€</td>
+          <td><span class="${statusClass}">${statusText}</span></td>
+          <td class="${pnlClass}">${pnlText}</td>
+          <td>${actionsHtml}</td>
+        </tr>
+      `;
+    }).join('');
+    
+  } catch (e) {
+    console.error('Error cargando picks:', e);
+  }
+}
+
+async function colocarPaperPick() {
+  if (!paperPortfolioId) {
+    alert('No hay portfolio activo');
+    return;
+  }
+  
+  const match = $('#paper-match').value.trim();
+  const league = $('#paper-league').value;
+  const kickoff = $('#paper-kickoff').value;
+  const market = $('#paper-market').value;
+  const choice = $('#paper-choice').value.trim();
+  const odds = parseFloat($('#paper-odds').value);
+  const prob = parseFloat($('#paper-prob').value) / 100;
+  const stake = $('#paper-stake').value ? parseFloat($('#paper-stake').value) : null;
+  
+  if (!match || !league || !kickoff || !market || !choice || !odds || !prob) {
+    alert('Completa todos los campos obligatorios');
+    return;
+  }
+  
+  // Parsear equipos del match
+  const teams = match.split(' vs ').map(t => t.trim());
+  if (teams.length !== 2) {
+    alert('Formato partido: "Equipo Local vs Equipo Visitante"');
+    return;
+  }
+  const home_team = teams[0];
+  const away_team = teams[1];
+  
+  const match_id = `${home_team}_vs_${away_team}_${league}_${kickoff.split('T')[0]}`;
+  
+  try {
+    let result;
+    if (stake) {
+      result = await fetchJson(`/api/paper/portfolios/${paperPortfolioId}/picks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          match_id, home_team, away_team, league, kickoff,
+          market, choice, odds, probability: prob, stake_units: stake
+        })
+      });
+    } else {
+      result = await fetchJson(`/api/paper/portfolios/${paperPortfolioId}/picks/from-recommendation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          league_code: league, home_team, away_team,
+          market, choice, odds, probability: prob
+        })
+      });
+    }
+    
+    alert(`✅ Pick colocado: ${result.stake_units.toFixed(2)}€ (Kelly: ${result.kelly_stake_pct.toFixed(2)}%)`);
+    
+    // Limpiar formulario
+    $('#paper-match').value = '';
+    $('#paper-choice').value = '';
+    $('#paper-odds').value = '';
+    $('#paper-prob').value = '';
+    $('#paper-stake').value = '';
+    $('#paper-kickoff').value = '';
+    
+    await cargarPaperPortfolio();
+    await cargarPaperPicks();
+    
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function liquidarPaperPick(pickId) {
+  const score = prompt('Resultado final (ej: 2-1):');
+  if (!score) return;
+  
+  try {
+    const result = await fetchJson(`/api/paper/picks/${pickId}/settle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actual_score: score })
+    });
+    
+    alert(`${result.result.toUpperCase()} | P&L: ${result.pnl >= 0 ? '+' : ''}${result.pnl.toFixed(2)}€ (ROI: ${result.roi_pct.toFixed(2)}%)`);
+    
+    await cargarPaperPortfolio();
+    await cargarPaperPicks();
+    
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function cancelarPaperPick(pickId) {
+  if (!confirm('¿Cancelar este pick? Se devolverá el stake al bankroll.')) return;
+  
+  try {
+    await fetchJson(`/api/paper/picks/${pickId}/cancel`, { method: 'POST' });
+    alert('Pick cancelado, stake devuelto');
+    await cargarPaperPortfolio();
+    await cargarPaperPicks();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
 
 // ===================== BOOKMAKERS RANKING =====================
 

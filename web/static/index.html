@@ -19,6 +19,7 @@
         <button class="nav-btn" id="nav-proximos"><i class="fas fa-calendar"></i> Próximos</button>
         <button class="nav-btn" id="nav-mejores"><i class="fas fa-gem"></i> Top del Día</button>
         <button class="nav-btn" id="nav-bookmakers"><i class="fas fa-chart-line"></i> Bookmakers</button>
+        <button class="nav-btn" id="nav-paper"><i class="fas fa-chart-area"></i> Paper Trading</button>
       </nav>
     </div>
   </header>
@@ -257,6 +258,165 @@
               </tr>
             </thead>
             <tbody id="bm-ranking-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+ 
+    <!-- Vista Paper Trading -->
+    <section id="view-paper" class="view hidden">
+      <div class="page-head">
+        <button class="back-btn" onclick="goHome()"><i class="fas fa-arrow-left"></i> Inicio</button>
+        <h2><i class="fas fa-chart-area"></i> Paper Trading Simulator</h2>
+      </div>
+      
+      <!-- Portfolio Selector / Creator -->
+      <div class="card bankroll-card" id="paper-portfolio-card">
+        <h3 class="card-title"><i class="fas fa-briefcase"></i> Portfolio Activo</h3>
+        <div id="paper-portfolio-info" class="stats-grid"></div>
+        <div class="bankroll-controls" style="margin-top: 16px;">
+          <div class="control-group">
+            <label><i class="fas fa-cog"></i> Kelly Fraction</label>
+            <select id="paper-kelly-select" onchange="actualizarPaperSettings()">
+              <option value="0.1">1/10 Kelly (0.10)</option>
+              <option value="0.25" selected>1/4 Kelly (0.25)</option>
+              <option value="0.5">1/2 Kelly (0.50)</option>
+              <option value="1.0">Full Kelly (1.00)</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-shield-alt"></i> Max Bet %</label>
+            <select id="paper-maxbet-select" onchange="actualizarPaperSettings()">
+              <option value="0.02">2%</option>
+              <option value="0.05" selected>5%</option>
+              <option value="0.1">10%</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="crearNuevoPortfolio()">
+            <i class="fas fa-plus"></i> Nuevo Portfolio
+          </button>
+        </div>
+      </div>
+ 
+      <!-- Performance Summary Cards -->
+      <div class="card" id="paper-perf-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-trophy"></i> Rendimiento</h3>
+        <div id="paper-perf-summary" class="stats-grid"></div>
+      </div>
+ 
+      <!-- Period Performance -->
+      <div class="card" id="paper-period-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-chart-line"></i> ROI por Período</h3>
+        <div class="table-responsive">
+          <table id="paper-period-table">
+            <thead>
+              <tr>
+                <th>Período</th>
+                <th>Picks</th>
+                <th>ROI</th>
+                <th>Win Rate</th>
+                <th>P&L</th>
+                <th>Sharpe</th>
+                <th>Max DD</th>
+              </tr>
+            </thead>
+            <tbody id="paper-period-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- Place Pick Form -->
+      <div class="card" id="paper-place-card">
+        <h3 class="card-title"><i class="fas fa-plus-circle"></i> Colocar Pick</h3>
+        <div class="bankroll-controls">
+          <div class="control-group">
+            <label><i class="fas fa-futbol"></i> Partido</label>
+            <input type="text" id="paper-match" placeholder="Ej: Real Madrid vs Barcelona" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-trophy"></i> Liga</label>
+            <select id="paper-league">
+              <option value="PD">La Liga</option>
+              <option value="PL">Premier League</option>
+              <option value="SA">Serie A</option>
+              <option value="BL1">Bundesliga</option>
+              <option value="FL1">Ligue 1</option>
+              <option value="CL">Champions League</option>
+              <option value="ARG">Liga Argentina</option>
+              <option value="BRA">Brasileirão</option>
+              <option value="MEX">Liga MX</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-calendar"></i> Kickoff</label>
+            <input type="datetime-local" id="paper-kickoff" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-list"></i> Mercado</label>
+            <select id="paper-market">
+              <option value="h2h">1X2 (1, X, 2)</option>
+              <option value="totals">Over/Under</option>
+              <option value="btts">BTTS</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-bullseye"></i> Selección</label>
+            <input type="text" id="paper-choice" placeholder="Ej: 1, over_2.5, yes" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-hashtag"></i> Cuota</label>
+            <input type="number" id="paper-odds" step="0.01" min="1.01" placeholder="2.10" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-percentage"></i> Probabilidad %</label>
+            <input type="number" id="paper-prob" step="0.1" min="0" max="100" placeholder="55" />
+          </div>
+          <div class="control-group">
+            <label><i class="fas fa-coins"></i> Stake (opcional)</label>
+            <input type="number" id="paper-stake" step="0.01" min="0" placeholder="Auto (Kelly)" />
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="colocarPaperPick()">
+            <i class="fas fa-paper-plane"></i> Colocar Pick
+          </button>
+        </div>
+      </div>
+ 
+      <!-- Picks History -->
+      <div class="card" id="paper-history-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-history"></i> Historial de Picks</h3>
+        <div class="bankroll-controls" style="margin-bottom: 16px;">
+          <div class="control-group">
+            <label>Filtrar</label>
+            <select id="paper-status-filter" onchange="cargarPaperPicks()">
+              <option value="">Todos</option>
+              <option value="pending">Pendientes</option>
+              <option value="settled">Liquidados</option>
+              <option value="won">Ganados</option>
+              <option value="lost">Perdidos</option>
+              <option value="void">Anulados</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="cargarPaperPicks()">
+            <i class="fas fa-sync"></i> Refrescar
+          </button>
+        </div>
+        <div class="table-responsive">
+          <table id="paper-picks-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Partido</th>
+                <th>Liga</th>
+                <th>Mercado</th>
+                <th>Pick</th>
+                <th>Cuota</th>
+                <th>Stake</th>
+                <th>Estado</th>
+                <th>P&L</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="paper-picks-body"></tbody>
           </table>
         </div>
       </div>

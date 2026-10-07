@@ -849,6 +849,65 @@ main { flex: 1; padding: 30px 0 50px; }
   color: var(--primary);
 }
 
+/* ===================== PAPER TRADING ===================== */
+#paper-picks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 900px;
+}
+#paper-picks-table th {
+  background: var(--bg);
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  padding: 10px 8px;
+  border-bottom: 2px solid var(--card-border);
+}
+#paper-picks-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--card-border);
+  vertical-align: middle;
+}
+#paper-picks-table tbody tr:hover {
+  background: var(--primary-bg);
+}
+#paper-picks-table .mejor-market {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.status-pending { color: var(--accent); }
+.status-won { color: var(--primary); }
+.status-lost { color: var(--danger); }
+.status-void { color: var(--muted); }
+.status-settled { color: var(--primary); }
+
+#paper-period-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+#paper-period-table th {
+  background: var(--bg);
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  padding: 12px 10px;
+  border-bottom: 2px solid var(--card-border);
+}
+#paper-period-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--card-border);
+}
+#paper-period-table tbody tr:hover {
+  background: var(--primary-bg);
+}
+
 @media (max-width: 600px) {
   .bankroll-controls { flex-direction: column; align-items: stretch; }
   .bankroll-controls .control-group { width: 100%; }

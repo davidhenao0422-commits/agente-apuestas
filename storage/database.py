@@ -192,6 +192,60 @@ CREATE INDEX IF NOT EXISTS idx_bookmaker_scores ON bookmaker_scores(bookmaker, l
 CREATE INDEX IF NOT EXISTS idx_odds_snapshots_match ON odds_snapshots(match_id);
 CREATE INDEX IF NOT EXISTS idx_odds_snapshots_time ON odds_snapshots(snapshot_at);
 CREATE INDEX IF NOT EXISTS idx_odds_snapshots_sharp ON odds_snapshots(is_sharp, snapshot_at);
+
+CREATE TABLE IF NOT EXISTS paper_portfolio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL DEFAULT 'Default',
+    initial_bankroll REAL NOT NULL DEFAULT 1000,
+    current_bankroll REAL NOT NULL DEFAULT 1000,
+    currency TEXT NOT NULL DEFAULT 'EUR',
+    kelly_fraction REAL NOT NULL DEFAULT 0.25,
+    max_bet_pct REAL NOT NULL DEFAULT 0.05,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    is_active INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS paper_picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    match_id TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    league TEXT NOT NULL,
+    kickoff TEXT NOT NULL,
+    market TEXT NOT NULL,
+    choice TEXT NOT NULL,
+    odds REAL NOT NULL,
+    probability REAL NOT NULL,
+    edge REAL,
+    kelly_stake_pct REAL,
+    stake_units REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, won, lost, void, settled
+    result TEXT,  -- win, loss, push
+    pnl REAL,
+    settled_at TEXT,
+    placed_at TEXT DEFAULT (datetime('now')),
+    source TEXT,  -- 'manual', 'auto', 'scheduler'
+    confidence_score INTEGER,
+    ensemble_weights TEXT,
+    expected_goals TEXT
+);
+
+CREATE TABLE IF NOT EXISTS paper_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pick_id INTEGER NOT NULL REFERENCES paper_picks(id),
+    actual_result TEXT,  -- home_win, draw, away_win, over, under, btts_yes, btts_no
+    actual_score TEXT,  -- "2-1"
+    settled_at TEXT NOT NULL,
+    pnl REAL NOT NULL,
+    roi_pct REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_picks_portfolio ON paper_picks(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_paper_picks_status ON paper_picks(status);
+CREATE INDEX IF NOT EXISTS idx_paper_picks_kickoff ON paper_picks(kickoff);
+CREATE INDEX IF NOT EXISTS idx_paper_settlements_pick ON paper_settlements(pick_id);
 """
 
 
@@ -611,4 +665,229 @@ class Database:
                WHERE match_id = ? AND market = ? AND is_sharp = 1 AND snapshot_at >= ?
                ORDER BY bookmaker, snapshot_at ASC""",
             (match_id, market, cutoff),
+        )
+
+    # ---------- Paper Trading ----------
+    def create_portfolio(self, name: str = "Default", initial_bankroll: float = 1000,
+                         kelly_fraction: float = 0.25, max_bet_pct: float = 0.05,
+                         currency: str = "EUR") -> int:
+        return self.execute(
+            """INSERT INTO paper_portfolio
+               (name, initial_bankroll, current_bankroll, currency, kelly_fraction, max_bet_pct)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (name, initial_bankroll, initial_bankroll, currency, kelly_fraction, max_bet_pct),
+        )
+
+    def get_portfolio(self, portfolio_id: int) -> Optional[dict]:
+        return self.query_one("SELECT * FROM paper_portfolio WHERE id = ?", (portfolio_id,))
+
+    def get_active_portfolio(self) -> Optional[dict]:
+        return self.query_one(
+            "SELECT * FROM paper_portfolio WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1"
+        )
+
+    def update_portfolio_bankroll(self, portfolio_id: int, new_bankroll: float) -> None:
+        self.execute(
+            "UPDATE paper_portfolio SET current_bankroll = ?, updated_at = datetime('now') WHERE id = ?",
+            (new_bankroll, portfolio_id),
+        )
+
+    def get_all_portfolios(self) -> List[dict]:
+        return self.query("SELECT * FROM paper_portfolio ORDER BY created_at DESC")
+
+    def place_pick(self, pick: dict) -> int:
+        return self.execute(
+            """INSERT INTO paper_picks
+               (portfolio_id, match_id, home_team, away_team, league, kickoff, market, choice,
+                odds, probability, edge, kelly_stake_pct, stake_units, status, source,
+                confidence_score, ensemble_weights, expected_goals)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                pick.get("portfolio_id"),
+                pick.get("match_id"),
+                pick.get("home_team"),
+                pick.get("away_team"),
+                pick.get("league"),
+                pick.get("kickoff"),
+                pick.get("market"),
+                pick.get("choice"),
+                pick.get("odds"),
+                pick.get("probability"),
+                pick.get("edge"),
+                pick.get("kelly_stake_pct"),
+                pick.get("stake_units"),
+                pick.get("status", "pending"),
+                pick.get("source", "manual"),
+                pick.get("confidence_score"),
+                pick.get("ensemble_weights"),
+                pick.get("expected_goals"),
+            ),
+        )
+
+    def get_picks(self, portfolio_id: int, status: str = None, limit: int = 100) -> List[dict]:
+        query = "SELECT * FROM paper_picks WHERE portfolio_id = ?"
+        params = [portfolio_id]
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY placed_at DESC LIMIT ?"
+        params.append(limit)
+        return self.query(query, tuple(params))
+
+    def get_pending_picks(self, portfolio_id: int = None) -> List[dict]:
+        query = "SELECT * FROM paper_picks WHERE status = 'pending'"
+        params = []
+        if portfolio_id:
+            query += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        query += " ORDER BY kickoff ASC"
+        return self.query(query, tuple(params))
+
+    def get_pick(self, pick_id: int) -> Optional[dict]:
+        return self.query_one("SELECT * FROM paper_picks WHERE id = ?", (pick_id,))
+
+    def update_pick_status(self, pick_id: int, status: str, result: str = None, 
+                           pnl: float = None, settled_at: str = None) -> None:
+        updates = ["status = ?"]
+        params = [status]
+        if result:
+            updates.append("result = ?")
+            params.append(result)
+        if pnl is not None:
+            updates.append("pnl = ?")
+            params.append(pnl)
+        if settled_at:
+            updates.append("settled_at = ?")
+            params.append(settled_at)
+        params.append(pick_id)
+        self.execute(
+            f"UPDATE paper_picks SET {', '.join(updates)} WHERE id = ?",
+            tuple(params),
+        )
+
+    def settle_pick(self, pick_id: int, actual_result: str, actual_score: str,
+                    pnl: float, roi_pct: float) -> int:
+        from datetime import datetime
+        settled_at = datetime.now().isoformat()
+        
+        # Update pick
+        self.execute(
+            """UPDATE paper_picks SET status = 'settled', result = ?, pnl = ?, settled_at = ?
+               WHERE id = ?""",
+            ("win" if pnl > 0 else "loss" if pnl < 0 else "push", pnl, settled_at, pick_id),
+        )
+        
+        # Record settlement
+        return self.execute(
+            """INSERT INTO paper_settlements
+               (pick_id, actual_result, actual_score, settled_at, pnl, roi_pct)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (pick_id, actual_result, actual_score, settled_at, pnl, roi_pct),
+        )
+
+    def get_portfolio_performance(self, portfolio_id: int, days: int = 30) -> dict:
+        from datetime import date, timedelta
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        
+        picks = self.query(
+            """SELECT * FROM paper_picks 
+               WHERE portfolio_id = ? AND placed_at >= ? AND status = 'settled'
+               ORDER BY settled_at ASC""",
+            (portfolio_id, cutoff),
+        )
+        
+        if not picks:
+            return {"total_picks": 0, "wins": 0, "losses": 0, "pushes": 0, 
+                    "total_staked": 0, "total_pnl": 0, "roi_pct": 0, 
+                    "win_rate": 0, "avg_odds": 0, "sharpe": 0, "max_drawdown": 0}
+        
+        total_picks = len(picks)
+        wins = sum(1 for p in picks if p["result"] == "win")
+        losses = sum(1 for p in picks if p["result"] == "loss")
+        pushes = sum(1 for p in picks if p["result"] == "push")
+        total_staked = sum(p["stake_units"] for p in picks)
+        total_pnl = sum(p["pnl"] for p in picks)
+        roi_pct = (total_pnl / total_staked * 100) if total_staked > 0 else 0
+        win_rate = wins / total_picks * 100 if total_picks > 0 else 0
+        avg_odds = sum(p["odds"] for p in picks) / total_picks if total_picks > 0 else 0
+        
+        # Sharpe ratio (daily returns)
+        daily_pnl = {}
+        for p in picks:
+            day = p["settled_at"][:10]
+            daily_pnl[day] = daily_pnl.get(day, 0) + p["pnl"]
+        returns = list(daily_pnl.values())
+        sharpe = 0
+        if len(returns) > 1:
+            mean_r = np.mean(returns) if 'np' in globals() else sum(returns)/len(returns)
+            std_r = np.std(returns) if 'np' in globals() else (sum((r-mean_r)**2 for r in returns)/len(returns))**0.5
+            if std_r > 0:
+                sharpe = mean_r / std_r * (252**0.5)  # annualized
+        
+        # Max drawdown
+        peak = 0
+        max_dd = 0
+        running = 0
+        for p in picks:
+            running += p["pnl"]
+            if running > peak:
+                peak = running
+            dd = peak - running
+            if dd > max_dd:
+                max_dd = dd
+        
+        # By market
+        by_market = {}
+        for p in picks:
+            m = p["market"]
+            if m not in by_market:
+                by_market[m] = {"picks": 0, "wins": 0, "pnl": 0, "staked": 0}
+            by_market[m]["picks"] += 1
+            if p["result"] == "win":
+                by_market[m]["wins"] += 1
+            by_market[m]["pnl"] += p["pnl"]
+            by_market[m]["staked"] += p["stake_units"]
+        
+        for m in by_market:
+            by_market[m]["win_rate"] = round(by_market[m]["wins"] / by_market[m]["picks"] * 100, 1)
+            by_market[m]["roi"] = round(by_market[m]["pnl"] / by_market[m]["staked"] * 100, 1) if by_market[m]["staked"] > 0 else 0
+        
+        # By league
+        by_league = {}
+        for p in picks:
+            l = p["league"]
+            if l not in by_league:
+                by_league[l] = {"picks": 0, "wins": 0, "pnl": 0, "staked": 0}
+            by_league[l]["picks"] += 1
+            if p["result"] == "win":
+                by_league[l]["wins"] += 1
+            by_league[l]["pnl"] += p["pnl"]
+            by_league[l]["staked"] += p["stake_units"]
+        
+        for l in by_league:
+            by_league[l]["win_rate"] = round(by_league[l]["wins"] / by_league[l]["picks"] * 100, 1)
+            by_league[l]["roi"] = round(by_league[l]["pnl"] / by_league[l]["staked"] * 100, 1) if by_league[l]["staked"] > 0 else 0
+        
+        return {
+            "total_picks": total_picks,
+            "wins": wins,
+            "losses": losses,
+            "pushes": pushes,
+            "total_staked": round(total_staked, 2),
+            "total_pnl": round(total_pnl, 2),
+            "roi_pct": round(roi_pct, 2),
+            "win_rate": round(win_rate, 1),
+            "avg_odds": round(avg_odds, 2),
+            "sharpe": round(sharpe, 2),
+            "max_drawdown": round(max_dd, 2),
+            "by_market": by_market,
+            "by_league": by_league,
+            "current_bankroll": self.get_portfolio(portfolio_id)["current_bankroll"] if self.get_portfolio(portfolio_id) else 0,
+        }
+
+    def get_recent_picks(self, portfolio_id: int, limit: int = 20) -> List[dict]:
+        return self.query(
+            """SELECT * FROM paper_picks WHERE portfolio_id = ? 
+               ORDER BY placed_at DESC LIMIT ?""",
+            (portfolio_id, limit),
         )

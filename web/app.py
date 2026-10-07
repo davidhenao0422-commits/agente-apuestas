@@ -1710,3 +1710,224 @@ def get_bookmaker_leagues():
            ORDER BY total_snapshots DESC"""
     )
     return {"leagues": leagues, "count": len(leagues)}
+
+
+# ===================== PAPER TRADING ENDPOINTS =====================
+
+@app.get("/api/paper/portfolios")
+def get_paper_portfolios():
+    """Lista todos los portfolios de paper trading."""
+    db = _get_db()
+    portfolios = db.get_all_portfolios()
+    return {"portfolios": portfolios, "count": len(portfolios)}
+
+
+@app.post("/api/paper/portfolios")
+def create_paper_portfolio(name: str = "Default", initial_bankroll: float = 1000,
+                            kelly_fraction: float = 0.25, max_bet_pct: float = 0.05,
+                            currency: str = "EUR"):
+    """Crea un nuevo portfolio de paper trading."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    portfolio_id = engine.create_portfolio(
+        name=name, initial_bankroll=initial_bankroll,
+        kelly_fraction=kelly_fraction, max_bet_pct=max_bet_pct,
+        currency=currency
+    )
+    
+    portfolio = engine.get_portfolio(portfolio_id)
+    return {"success": True, "portfolio": portfolio}
+
+
+@app.get("/api/paper/portfolios/{portfolio_id}")
+def get_paper_portfolio(portfolio_id: int):
+    """Obtiene detalle de un portfolio."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    portfolio = engine.get_portfolio(portfolio_id)
+    if not portfolio:
+        raise HTTPException(404, detail="Portfolio no encontrado")
+    
+    return portfolio
+
+
+@app.put("/api/paper/portfolios/{portfolio_id}/settings")
+def update_paper_portfolio_settings(portfolio_id: int, kelly_fraction: float = None,
+                                     max_bet_pct: float = None):
+    """Actualiza configuración del portfolio."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    engine.update_portfolio_settings(portfolio_id, kelly_fraction, max_bet_pct)
+    portfolio = engine.get_portfolio(portfolio_id)
+    
+    return {"success": True, "portfolio": portfolio}
+
+
+@app.get("/api/paper/portfolios/{portfolio_id}/performance")
+def get_paper_performance(portfolio_id: int, days: int = 30):
+    """Métricas de rendimiento del portfolio."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    perf = engine.get_performance(portfolio_id, days)
+    summary = engine.get_performance_summary(portfolio_id)
+    
+    return {
+        "period_days": days,
+        "performance": {
+            "total_picks": perf.total_picks,
+            "wins": perf.wins,
+            "losses": perf.losses,
+            "pushes": perf.pushes,
+            "total_staked": perf.total_staked,
+            "total_pnl": perf.total_pnl,
+            "roi_pct": perf.roi_pct,
+            "win_rate": perf.win_rate,
+            "avg_odds": perf.avg_odds,
+            "sharpe": perf.sharpe,
+            "max_drawdown": perf.max_drawdown,
+            "current_bankroll": perf.current_bankroll,
+            "by_market": perf.by_market,
+            "by_league": perf.by_league,
+        },
+        "summary": summary,
+    }
+
+
+@app.get("/api/paper/portfolios/{portfolio_id}/picks")
+def get_paper_picks(portfolio_id: int, status: str = None, limit: int = 100):
+    """Historial de picks del portfolio."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    picks = engine.get_picks(portfolio_id, status, limit)
+    return {"picks": picks, "count": len(picks)}
+
+
+@app.get("/api/paper/portfolios/{portfolio_id}/pending")
+def get_pending_picks(portfolio_id: int):
+    """Picks pendientes de liquidar."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    picks = engine.get_pending_picks(portfolio_id)
+    return {"picks": picks, "count": len(picks)}
+
+
+@app.post("/api/paper/portfolios/{portfolio_id}/picks")
+def place_paper_pick(portfolio_id: int, 
+                      match_id: str,
+                      home_team: str,
+                      away_team: str,
+                      league: str,
+                      kickoff: str,
+                      market: str,
+                      choice: str,
+                      odds: float,
+                      probability: float,
+                      stake_units: float = None,
+                      edge: float = None,
+                      source: str = "manual",
+                      kelly_fraction: float = None,
+                      max_bet_pct: float = None):
+    """Coloca un pick manual en paper trading."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    if stake_units:
+        # Pick manual con stake fijo
+        result = engine.place_manual_pick(
+            portfolio_id, match_id, home_team, away_team, league,
+            kickoff, market, choice, odds, probability, stake_units, source
+        )
+    else:
+        # Pick con Kelly automático
+        result = engine.place_pick_from_recommendation(
+            portfolio_id, league, home_team, away_team,
+            market, choice, odds, probability, edge,
+            kelly_fraction=kelly_fraction, max_bet_pct=max_bet_pct
+        )
+    
+    if not result.get("success"):
+        raise HTTPException(400, detail=result.get("error"))
+    
+    return result
+
+
+@app.post("/api/paper/portfolios/{portfolio_id}/picks/from-recommendation")
+def place_pick_from_recommendation(portfolio_id: int,
+                                    league_code: str,
+                                    home_team: str,
+                                    away_team: str,
+                                    market: str,
+                                    choice: str,
+                                    odds: float,
+                                    probability: float,
+                                    edge: float = None,
+                                    confidence_score: int = None,
+                                    kelly_fraction: float = None,
+                                    max_bet_pct: float = None):
+    """Coloca un pick basado en recomendación del ensemble (usa Kelly)."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    result = engine.place_pick_from_recommendation(
+        portfolio_id, league_code, home_team, away_team,
+        market, choice, odds, probability, edge,
+        confidence_score=confidence_score,
+        kelly_fraction=kelly_fraction, max_bet_pct=max_bet_pct
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(400, detail=result.get("error"))
+    
+    return result
+
+
+@app.post("/api/paper/picks/{pick_id}/cancel")
+def cancel_paper_pick(pick_id: int):
+    """Cancela un pick pendiente y devuelve el stake."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    result = engine.cancel_pick(pick_id)
+    if not result.get("success"):
+        raise HTTPException(400, detail=result.get("error"))
+    
+    return result
+
+
+@app.post("/api/paper/picks/{pick_id}/settle")
+def settle_paper_pick(pick_id: int, actual_score: str):
+    """Liquida un pick con el resultado real (ej: '2-1')."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    result = engine.settle_pick(pick_id, actual_score)
+    if not result.get("success"):
+        raise HTTPException(400, detail=result.get("error"))
+    
+    return result
+
+
+@app.post("/api/paper/portfolios/{portfolio_id}/auto-settle")
+def auto_settle_pending(portfolio_id: int):
+    """Intenta liquidar automáticamente picks de partidos finalizados."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    result = engine.auto_settle_pending(portfolio_id)
+    return result
+
+
+@app.get("/api/paper/portfolios/{portfolio_id}/activity")
+def get_recent_activity(portfolio_id: int, limit: int = 20):
+    """Actividad reciente del portfolio."""
+    from analyzers.paper_trading import create_paper_trading_engine
+    engine = create_paper_trading_engine(_get_db())
+    
+    activity = engine.get_recent_activity(portfolio_id, limit)
+    return {"activity": activity, "count": len(activity)}
