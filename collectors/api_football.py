@@ -26,7 +26,7 @@ class APIFootballClient:
 
     DAILY_LIMIT = 100
     MINUTE_LIMIT = 10
-    MIN_INTERVAL = 6.0  # segundos entre requests para no pasar 10/min
+    MIN_INTERVAL = 3.0  # segundos entre requests (permite ~20/min, seguro para 100/día)
 
     def __init__(self, db: Optional[Database] = None):
         self.api_key = Config.API_FOOTBALL_KEY

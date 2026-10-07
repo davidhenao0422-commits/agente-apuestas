@@ -936,7 +936,7 @@ def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float 
 
 
 @app.get("/api/mejores-apuestas")
-def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3, demo: bool = False, days_ahead: int = 1):
+def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3, demo: bool = False, days_ahead: int = 0, fast: bool = False):
     """Mejores value bets del día TODAS las ligas combinadas.
     
     Si demo=true: genera partidos simulados para testing de la UI.
@@ -1069,7 +1069,7 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             "date": date.today().isoformat(),
             "total_analyzed": len(all_value_bets),
             "top_bets": final_bets,
-            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge},
+            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead, "fast": fast},
             "demo": True,
         }
     
@@ -1094,15 +1094,20 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             "date": date.today().isoformat(),
             "total_analyzed": 0,
             "top_bets": [],
-            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead},
+            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead, "fast": fast},
             "message": f"No hay partidos en los próximos {days_ahead + 1} día(s)",
         }
     
-    # Obtener odds reales de The Odds API por cada liga que tenga partidos
-    from config import Config
-    odds_api_key = Config.ODDS_API_KEY
-    odds_by_league = {}  # {league_code: {match_key: odds_data}}
-    if odds_api_key:
+    # Modo FAST: saltar odds API y limitar partidos procesados
+    if fast:
+        all_fixtures = all_fixtures[:30]
+        odds_by_league = {}
+    else:
+        # Obtener odds reales de The Odds API por cada liga que tenga partidos
+        from config import Config
+        odds_api_key = Config.ODDS_API_KEY
+        odds_by_league = {}  # {league_code: {match_key: odds_data}}
+        if odds_api_key:
         leagues_with_fixtures = set()
         for fix in all_fixtures:
             teams_info = fix.get("teams", {})
@@ -1260,7 +1265,7 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
         "date": date.today().isoformat(),
         "total_analyzed": len(all_value_bets),
         "top_bets": final_bets,
-        "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead},
+        "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead, "fast": fast},
     }
 
 
