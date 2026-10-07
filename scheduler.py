@@ -603,6 +603,94 @@ class BettingScheduler:
         except Exception as e:
             logger.error(f"Error generando resumen paper trading: {e}")
 
+    # ===================== RISK MANAGEMENT JOBS =====================
+
+    async def risk_monitoring_job(self):
+        """Job: monitorea límites de riesgo y genera alertas."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("🛡️ Risk Management: verificando límites...")
+        try:
+            from analyzers.risk_management import create_risk_manager
+            rm = create_risk_manager(self.db)
+            
+            portfolios = self.db.get_all_portfolios()
+            active_portfolios = [p for p in portfolios if p.get("is_active")]
+            
+            total_alerts = 0
+            messages = []
+            
+            for portfolio in active_portfolios:
+                alerts = rm.check_and_alert(portfolio["id"])
+                total_alerts += len(alerts)
+                
+                for alert in alerts:
+                    sev_emoji = "🔴" if alert["severity"] == "critical" else "🟡"
+                    messages.append(f"{sev_emoji} <b>{portfolio['name']}</b>: {alert['message']}")
+            
+            if messages and self.bot and self.channel_id:
+                message = "🛡️ <b>Risk Management - Alertas</b>\n\n" + "\n".join(messages[:10])
+                if len(messages) > 10:
+                    message += f"\n\n... y {len(messages) - 10} alertas más"
+                
+                await self.bot.send_message(
+                    chat_id=self.channel_id,
+                    text=message,
+                    parse_mode="HTML"
+                )
+            
+            logger.info(f"✅ Risk Management: {total_alerts} alertas generadas")
+            
+        except Exception as e:
+            logger.error(f"Error en risk monitoring: {e}")
+
+    async def risk_summary_job(self):
+        """Job diario: resumen de riesgo de portfolios."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("🛡️ Risk Management: generando resumen diario...")
+        try:
+            from analyzers.risk_management import create_risk_manager
+            rm = create_risk_manager(self.db)
+            
+            portfolios = self.db.get_all_portfolios()
+            active_portfolios = [p for p in portfolios if p.get("is_active")]
+            
+            if not active_portfolios:
+                return
+            
+            message = "🛡️ <b>Risk Management - Resumen Diario</b>\n\n"
+            
+            for portfolio in active_portfolios[:5]:
+                metrics = rm.analyze_portfolio_risk(portfolio["id"])
+                
+                exposure_emoji = "🟢" if metrics.exposure_pct < 50 else "🟡" if metrics.exposure_pct < 80 else "🔴"
+                dd_emoji = "🟢" if metrics.current_drawdown < 5 else "🟡" if metrics.current_drawdown < 15 else "🔴"
+                
+                limits_breach = sum(1 for l in metrics.limits if l.status == "breach")
+                limits_warn = sum(1 for l in metrics.limits if l.status == "warning")
+                high_corr = sum(1 for c in metrics.correlations if c.correlation > 0.7)
+                
+                message += (
+                    f"{exposure_emoji} <b>{portfolio['name']}</b>\n"
+                    f"   Bankroll: {metrics.bankroll:.2f}€ | Exposición: {metrics.exposure_pct:.1f}%\n"
+                    f"   Drawdown: {dd_emoji} {metrics.current_drawdown:.1f}% (Max: {metrics.max_drawdown:.1f}%)\n"
+                    f"   Sharpe: {metrics.sharpe_ratio:.2f} | VaR 95%: {metrics.var_95:.2f}€\n"
+                    f"   Límites: {limits_breach} breach, {limits_warn} warning | Correl. altas: {high_corr}\n\n"
+                )
+            
+            await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("✅ Risk Management: resumen diario enviado")
+            
+        except Exception as e:
+            logger.error(f"Error generando resumen risk management: {e}")
+
 
 def run_scheduler():
     scheduler = BettingScheduler()
@@ -638,6 +726,14 @@ def run_scheduler():
         await scheduler.init_bot()
         await scheduler.paper_trading_summary_job()
     
+    async def risk_monitoring_task():
+        await scheduler.init_bot()
+        await scheduler.risk_monitoring_job()
+    
+    async def risk_summary_task():
+        await scheduler.init_bot()
+        await scheduler.risk_summary_job()
+    
     print("\n" + "=" * 50)
     print("SCHEDULER CONFIGURADO")
     print("=" * 50)
@@ -648,6 +744,8 @@ def run_scheduler():
     print("📊 Ranking bookmakers: 02:00 AM")
     print("📝 Paper Trading settlement: cada 30 min")
     print("📊 Paper Trading resumen: 07:00 AM")
+    print("🛡️ Risk Management monitoring: cada 15 min")
+    print("🛡️ Risk Management resumen: 06:00 AM")
     print("=" * 50)
     print("También puedes ejecutar la tarea diaria manualmente ahora.\n")
     
@@ -663,6 +761,8 @@ def run_scheduler():
     schedule.every().day.at("02:00").do(lambda: asyncio.run(bookmaker_scores_task()))
     schedule.every(30).minutes.do(lambda: asyncio.run(paper_settle_task()))
     schedule.every().day.at("07:00").do(lambda: asyncio.run(paper_summary_task()))
+    schedule.every(15).minutes.do(lambda: asyncio.run(risk_monitoring_task()))
+    schedule.every().day.at("06:00").do(lambda: asyncio.run(risk_summary_task()))
     
     print("\nScheduler ejecutándose. Presiona Ctrl+C para detener.")
     while True:

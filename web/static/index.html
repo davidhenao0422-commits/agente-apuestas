@@ -20,6 +20,7 @@
         <button class="nav-btn" id="nav-mejores"><i class="fas fa-gem"></i> Top del Día</button>
         <button class="nav-btn" id="nav-bookmakers"><i class="fas fa-chart-line"></i> Bookmakers</button>
         <button class="nav-btn" id="nav-paper"><i class="fas fa-chart-area"></i> Paper Trading</button>
+        <button class="nav-btn" id="nav-risk"><i class="fas fa-shield-alt"></i> Risk Mgmt</button>
       </nav>
     </div>
   </header>
@@ -419,6 +420,83 @@
             <tbody id="paper-picks-body"></tbody>
           </table>
         </div>
+      </div>
+    </section>
+ 
+    <!-- Vista Risk Management -->
+    <section id="view-risk" class="view hidden">
+      <div class="page-head">
+        <button class="back-btn" onclick="goHome()"><i class="fas fa-arrow-left"></i> Inicio</button>
+        <h2><i class="fas fa-shield-alt"></i> Risk Management</h2>
+      </div>
+      
+      <!-- Portfolio Selector -->
+      <div class="card bankroll-card" id="risk-portfolio-card">
+        <h3 class="card-title"><i class="fas fa-briefcase"></i> Portfolio</h3>
+        <div id="risk-portfolio-info" class="stats-grid"></div>
+        <div class="bankroll-controls" style="margin-top: 16px;">
+          <button class="btn btn-secondary btn-sm" onclick="inicializarLimitesRisk()">
+            <i class="fas fa-cog"></i> Inicializar Límites Default
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="verificarLimitesRisk()">
+            <i class="fas fa-search"></i> Verificar Límites Ahora
+          </button>
+        </div>
+      </div>
+ 
+      <!-- Risk Summary Cards -->
+      <div class="card" id="risk-summary-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-tachometer-alt"></i> Resumen de Riesgo</h3>
+        <div id="risk-summary" class="stats-grid"></div>
+      </div>
+ 
+      <!-- Exposure Breakdown -->
+      <div class="card" id="risk-exposure-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-chart-pie"></i> Exposición Actual</h3>
+        <div id="risk-exposure" class="stats-grid"></div>
+      </div>
+ 
+      <!-- Limits Table -->
+      <div class="card" id="risk-limits-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-ruler-combined"></i> Límites de Riesgo</h3>
+        <div class="table-responsive">
+          <table id="risk-limits-table">
+            <thead>
+              <tr>
+                <th>Límite</th>
+                <th>Valor Límite</th>
+                <th>Actual</th>
+                <th>Uso %</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="risk-limits-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- Correlations Table -->
+      <div class="card" id="risk-corr-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-link"></i> Correlaciones entre Picks (<span id="risk-corr-count">0</span>)</h3>
+        <div class="table-responsive">
+          <table id="risk-corr-table">
+            <thead>
+              <tr>
+                <th>Partido A</th>
+                <th>Partido B</th>
+                <th>Correlación</th>
+                <th>Factores</th>
+              </tr>
+            </thead>
+            <tbody id="risk-corr-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- Alerts -->
+      <div class="card" id="risk-alerts-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-bell"></i> Alertas Activas (<span id="risk-alerts-count">0</span>)</h3>
+        <div id="risk-alerts-list"></div>
       </div>
     </section>
  

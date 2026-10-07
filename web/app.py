@@ -1931,3 +1931,181 @@ def get_recent_activity(portfolio_id: int, limit: int = 20):
     
     activity = engine.get_recent_activity(portfolio_id, limit)
     return {"activity": activity, "count": len(activity)}
+
+
+# ===================== RISK MANAGEMENT ENDPOINTS =====================
+
+@app.get("/api/risk/portfolio/{portfolio_id}/dashboard")
+def get_risk_dashboard(portfolio_id: int):
+    """Dashboard completo de riesgo del portfolio."""
+    from analyzers.risk_management import create_risk_manager
+    rm = create_risk_manager(_get_db())
+    
+    dashboard = rm.get_risk_dashboard(portfolio_id)
+    return dashboard
+
+
+@app.get("/api/risk/portfolio/{portfolio_id}/metrics")
+def get_risk_metrics(portfolio_id: int):
+    """Métricas de riesgo actuales (exposición, drawdown, VaR, Sharpe)."""
+    from analyzers.risk_management import create_risk_manager
+    rm = create_risk_manager(_get_db())
+    
+    metrics = rm.analyze_portfolio_risk(portfolio_id)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "bankroll": metrics.bankroll,
+        "total_exposure": metrics.total_exposure,
+        "exposure_pct": metrics.exposure_pct,
+        "available_capital": metrics.bankroll - metrics.total_exposure,
+        "current_drawdown": metrics.current_drawdown,
+        "max_drawdown": metrics.max_drawdown,
+        "sharpe_ratio": metrics.sharpe_ratio,
+        "var_95": metrics.var_95,
+        "limits": [
+            {
+                "type": l.limit_type,
+                "limit": l.limit_value,
+                "current": l.current_value,
+                "utilization": l.utilization_pct,
+                "status": l.status,
+            }
+            for l in metrics.limits
+        ],
+        "correlations": [
+            {
+                "match_a": c.match_a,
+                "match_b": c.match_b,
+                "correlation": c.correlation,
+                "shared_team": c.shared_team,
+                "shared_league": c.shared_league,
+                "shared_market": c.shared_market,
+            }
+            for c in metrics.correlations
+        ],
+        "alerts": metrics.alerts,
+    }
+
+
+@app.get("/api/risk/portfolio/{portfolio_id}/limits")
+def get_risk_limits(portfolio_id: int):
+    """Límites de riesgo configurados y su estado actual."""
+    from analyzers.risk_management import create_risk_manager
+    rm = create_risk_manager(_get_db())
+    
+    metrics = rm.analyze_portfolio_risk(portfolio_id)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "limits": [
+            {
+                "type": l.limit_type,
+                "limit_value": l.limit_value,
+                "current_value": l.current_value,
+                "utilization_pct": l.utilization_pct,
+                "status": l.status,
+            }
+            for l in metrics.limits
+        ],
+        "summary": {
+            "ok": sum(1 for l in metrics.limits if l.status == "ok"),
+            "warning": sum(1 for l in metrics.limits if l.status == "warning"),
+            "breach": sum(1 for l in metrics.limits if l.status == "breach"),
+        },
+    }
+
+
+@app.post("/api/risk/portfolio/{portfolio_id}/limits")
+def set_risk_limit(portfolio_id: int, limit_type: str, limit_value: float):
+    """Configura un límite de riesgo personalizado."""
+    db = _get_db()
+    limit_id = db.set_risk_limit(portfolio_id, limit_type, limit_value)
+    return {"success": True, "limit_id": limit_id, "limit_type": limit_type, "limit_value": limit_value}
+
+
+@app.get("/api/risk/portfolio/{portfolio_id}/correlations")
+def get_risk_correlations(portfolio_id: int, min_correlation: float = 0.3):
+    """Correlaciones entre picks activos del portfolio."""
+    from analyzers.risk_management import create_risk_manager
+    rm = create_risk_manager(_get_db())
+    
+    metrics = rm.analyze_portfolio_risk(portfolio_id)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "correlations": [
+            {
+                "match_a": c.match_a,
+                "match_b": c.match_b,
+                "correlation": c.correlation,
+                "shared_team": c.shared_team,
+                "shared_league": c.shared_league,
+                "shared_market": c.shared_market,
+            }
+            for c in metrics.correlations
+            if c.correlation >= min_correlation
+        ],
+        "count": len([c for c in metrics.correlations if c.correlation >= min_correlation]),
+    }
+
+
+@app.get("/api/risk/portfolio/{portfolio_id}/alerts")
+def get_risk_alerts(portfolio_id: int, acknowledged: int = None, limit: int = 50):
+    """Alertas de riesgo activas/históricas."""
+    db = _get_db()
+    alerts = db.get_risk_alerts(portfolio_id, acknowledged, limit)
+    return {"alerts": alerts, "count": len(alerts)}
+
+
+@app.post("/api/risk/alerts/{alert_id}/acknowledge")
+def acknowledge_risk_alert(alert_id: int):
+    """Marca una alerta como reconocida."""
+    db = _get_db()
+    db.acknowledge_risk_alert(alert_id)
+    return {"success": True, "alert_id": alert_id}
+
+
+@app.post("/api/risk/portfolio/{portfolio_id}/check")
+def check_risk_limits(portfolio_id: int):
+    """Ejecuta verificación de límites y genera alertas si es necesario."""
+    from analyzers.risk_management import create_risk_manager
+    rm = create_risk_manager(_get_db())
+    
+    alerts = rm.check_and_alert(portfolio_id)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "alerts_generated": len(alerts),
+        "alerts": alerts,
+    }
+
+
+@app.post("/api/risk/portfolio/{portfolio_id}/optimize-kelly")
+def optimize_kelly(portfolio_id: int, probability: float, odds: float, 
+                   base_kelly_fraction: float = 0.25):
+    """Calcula fracción Kelly optimizada según riesgo actual."""
+    from analyzers.risk_management import create_risk_manager
+    rm = create_risk_manager(_get_db())
+    
+    optimized = rm.optimize_kelly_for_risk(
+        portfolio_id, probability, odds, base_kelly_fraction
+    )
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "base_kelly_fraction": base_kelly_fraction,
+        "optimized_kelly_fraction": optimized,
+        "reduction_factor": round(optimized / base_kelly_fraction, 3) if base_kelly_fraction > 0 else 0,
+    }
+
+
+@app.post("/api/risk/portfolio/{portfolio_id}/init-defaults")
+def init_default_risk_limits(portfolio_id: int):
+    """Inicializa límites de riesgo por defecto para el portfolio."""
+    from analyzers.risk_management import create_risk_manager
+    rm = create_risk_manager(_get_db())
+    
+    count = rm.set_default_limits(portfolio_id)
+    
+    return {"success": True, "limits_created": count}

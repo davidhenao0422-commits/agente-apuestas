@@ -1047,3 +1047,248 @@ async function cargarBookmakersRanking() {
     errorDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
   }
 }
+
+// ===================== RISK MANAGEMENT =====================
+
+async function goRisk() {
+  mostrar('#view-risk');
+  $('#nav-inicio').classList.remove('active');
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.remove('active');
+  $('#nav-mejores').classList.remove('active');
+  $('#nav-bookmakers').classList.remove('active');
+  $('#nav-paper').classList.remove('active');
+  $('#nav-risk').classList.add('active');
+  
+  await cargarRiskPortfolio();
+}
+
+async function cargarRiskPortfolio() {
+  try {
+    const data = await fetchJson('/api/paper/portfolios');
+    
+    if (data.portfolios && data.portfolios.length > 0) {
+      const active = data.portfolios.find(p => p.is_active) || data.portfolios[0];
+      riskPortfolioId = active.id;
+      mostrarRiskPortfolio(active);
+      await cargarRiskDashboard(riskPortfolioId);
+    } else {
+      $('#risk-portfolio-info').innerHTML = '<div class="empty">No hay portfolios. Ve a Paper Trading para crear uno.</div>';
+    }
+  } catch (e) {
+    console.error('Error cargando portfolio risk:', e);
+  }
+}
+
+let riskPortfolioId = null;
+
+function mostrarRiskPortfolio(p) {
+  const info = $('#risk-portfolio-info');
+  const initial = parseFloat(p.initial_bankroll);
+  const current = parseFloat(p.current_bankroll);
+  const totalReturn = ((current - initial) / initial * 100).toFixed(2);
+  const returnClass = totalReturn >= 0 ? '' : 'edge-baja';
+  
+  info.innerHTML = `
+    <div class="stat-item"><div class="label">Portfolio</div><div class="value">${p.name}</div></div>
+    <div class="stat-item"><div class="label">Inicial</div><div class="value">${initial.toFixed(2)} ${p.currency}</div></div>
+    <div class="stat-item"><div class="label">Actual</div><div class="value">${current.toFixed(2)} ${p.currency}</div></div>
+    <div class="stat-item"><div class="label">Retorno Total</div><div class="value ${returnClass}">${totalReturn >= 0 ? '+' : ''}${totalReturn}%</div></div>
+  `;
+  
+  $('#risk-summary-card').style.display = 'block';
+  $('#risk-exposure-card').style.display = 'block';
+  $('#risk-limits-card').style.display = 'block';
+  $('#risk-corr-card').style.display = 'block';
+  $('#risk-alerts-card').style.display = 'block';
+}
+
+async function cargarRiskDashboard(portfolioId) {
+  try {
+    const data = await fetchJson(`/api/risk/portfolio/${portfolioId}/dashboard`);
+    
+    // Risk Summary
+    const summary = $('#risk-summary');
+    const rm = data.risk_metrics;
+    const exp = data.exposure;
+    
+    summary.innerHTML = `
+      <div class="stat-item"><div class="label">Bankroll</div><div class="value">${exp.bankroll.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">Exposición</div><div class="value">${exp.total.toFixed(2)}€ (${exp.pct.toFixed(1)}%)</div></div>
+      <div class="stat-item"><div class="label">Disponible</div><div class="value">${exp.available.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">Drawdown Actual</div><div class="value edge-baja">${rm.current_drawdown.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Max Drawdown</div><div class="value edge-baja">${rm.max_drawdown.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Sharpe Ratio</div><div class="value">${rm.sharpe_ratio.toFixed(2)}</div></div>
+      <div class="stat-item"><div class="label">VaR 95%</div><div class="value edge-baja">${rm.var_95.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">Límites OK</div><div class="value">${data.limits_summary.ok}</div></div>
+      <div class="stat-item"><div class="label">Warnings</div><div class="value">${data.limits_summary.warning}</div></div>
+      <div class="stat-item"><div class="label">Breaches</div><div class="value edge-baja">${data.limits_summary.breach}</div></div>
+    `;
+    
+    // Exposure Breakdown
+    const exposureDiv = $('#risk-exposure');
+    if (data.limits_detail) {
+      const byLeague = data.limits_detail.filter(l => l.type.startsWith('league_'));
+      const byMarket = data.limits_detail.filter(l => l.type.startsWith('market_'));
+      
+      let exposureHtml = `
+        <div class="stat-item"><div class="label">Total</div><div class="value">${exp.total.toFixed(2)}€ (${exp.pct.toFixed(1)}%)</div></div>
+      `;
+      
+      if (byLeague.length) {
+        exposureHtml += '<h4 style="margin:12px 0 6px;color:var(--accent)"><i class="fas fa-trophy"></i> Por Liga</h4>';
+        byLeague.forEach(l => {
+          const statusClass = l.status === 'breach' ? 'edge-baja' : l.status === 'warning' ? '' : '';
+          exposureHtml += `
+            <div class="stat-item">
+              <div class="label">${l.type.replace('league_', '')}</div>
+              <div class="value ${statusClass}">${l.current.toFixed(2)}€ / ${l.limit.toFixed(2)}€ (${l.utilization.toFixed(0)}%)</div>
+            </div>
+          `;
+        });
+      }
+      
+      if (byMarket.length) {
+        exposureHtml += '<h4 style="margin:12px 0 6px;color:var(--accent)"><i class="fas fa-list"></i> Por Mercado</h4>';
+        byMarket.forEach(l => {
+          const statusClass = l.status === 'breach' ? 'edge-baja' : l.status === 'warning' ? '' : '';
+          exposureHtml += `
+            <div class="stat-item">
+              <div class="label">${l.type.replace('market_', '').toUpperCase()}</div>
+              <div class="value ${statusClass}">${l.current.toFixed(2)}€ / ${l.limit.toFixed(2)}€ (${l.utilization.toFixed(0)}%)</div>
+            </div>
+          `;
+        });
+      }
+      
+      exposureDiv.innerHTML = exposureHtml;
+    }
+    
+    // Limits Table
+    const limitsBody = $('#risk-limits-body');
+    if (data.limits_detail) {
+      limitsBody.innerHTML = data.limits_detail.map(l => {
+        let statusClass = '';
+        let statusText = l.status;
+        if (l.status === 'ok') { statusClass = 'status-won'; statusText = '✅ OK'; }
+        else if (l.status === 'warning') { statusClass = 'status-pending'; statusText = '⚠️ Warning'; }
+        else if (l.status === 'breach') { statusClass = 'status-lost'; statusText = '🚨 Breach'; }
+        
+        const typeLabel = l.type
+          .replace('league_', 'Liga: ')
+          .replace('market_', 'Mercado: ')
+          .replace('team_', 'Equipo: ')
+          .replace('max_exposure_pct', 'Exposición Total')
+          .replace('max_concurrent_picks', 'Picks Concurrentes');
+        
+        return `
+          <tr>
+            <td><strong>${typeLabel}</strong></td>
+            <td>${l.limit.toFixed(2)}€</td>
+            <td>${l.current.toFixed(2)}€</td>
+            <td><strong>${l.utilization.toFixed(1)}%</strong></td>
+            <td><span class="${statusClass}">${statusText}</span></td>
+          </tr>
+        `;
+      }).join('');
+    }
+    
+    // Correlations
+    const corrBody = $('#risk-corr-body');
+    const corrCount = $('#risk-corr-count');
+    if (data.correlations) {
+      corrCount.textContent = data.correlations.length;
+      if (data.correlations.length === 0) {
+        corrBody.innerHTML = '<tr><td colspan="4" class="empty">No hay correlaciones significativas (>30%)</td></tr>';
+      } else {
+        corrBody.innerHTML = data.correlations.map(c => {
+          const corrClass = c.correlation >= 0.7 ? 'edge-baja' : c.correlation >= 0.5 ? '' : '';
+          const factors = [];
+          if (c.shared_team) factors.push('<span class="bm-badge">Equipo</span>');
+          if (c.shared_league) factors.push('<span class="bm-badge">Liga</span>');
+          if (c.shared_market) factors.push('<span class="bm-badge">Mercado</span>');
+          
+          return `
+            <tr>
+              <td>${c.match_a}</td>
+              <td>${c.match_b}</td>
+              <td class="${corrClass}"><strong>${(c.correlation * 100).toFixed(0)}%</strong></td>
+              <td>${factors.join(' ') || '—'}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+    
+    // Alerts
+    const alertsList = $('#risk-alerts-list');
+    const alertsCount = $('#risk-alerts-count');
+    if (data.alerts) {
+      alertsCount.textContent = data.alerts.length;
+      if (data.alerts.length === 0) {
+        alertsList.innerHTML = '<div class="empty">✅ No hay alertas activas</div>';
+      } else {
+        alertsList.innerHTML = data.alerts.map(a => {
+          const sevClass = a.severity === 'critical' ? 'status-lost' : 
+                           a.severity === 'warning' ? 'status-pending' : 'status-void';
+          const sevIcon = a.severity === 'critical' ? '🔴' : 
+                          a.severity === 'warning' ? '🟡' : '🔵';
+          
+          return `
+            <div class="notice" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-start;">
+              <div>
+                <div style="font-weight: 600;">${sevIcon} ${a.message}</div>
+                <div style="font-size: 11px; color: var(--muted); margin-top: 4px;">
+                  Tipo: ${a.alert_type} | Valor: ${a.metric_value !== null ? a.metric_value.toFixed(2) : '—'} | Límite: ${a.limit_value !== null ? a.limit_value.toFixed(2) : '—'}
+                </div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="reconocerAlertaRisk(${a.id})" style="margin-left: 12px;">
+                <i class="fas fa-check"></i> Reconocer
+              </button>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+    
+  } catch (e) {
+    console.error('Error cargando risk dashboard:', e);
+  }
+}
+
+async function inicializarLimitesRisk() {
+  if (!riskPortfolioId) return;
+  
+  try {
+    const result = await fetchJson(`/api/risk/portfolio/${riskPortfolioId}/init-defaults`, { method: 'POST' });
+    alert(`✅ ${result.limits_created} límites inicializados`);
+    await cargarRiskDashboard(riskPortfolioId);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function verificarLimitesRisk() {
+  if (!riskPortfolioId) return;
+  
+  try {
+    const result = await fetchJson(`/api/risk/portfolio/${riskPortfolioId}/check`, { method: 'POST' });
+    if (result.alerts_generated > 0) {
+      alert(`⚠️ ${result.alerts_generated} alertas generadas`);
+    } else {
+      alert('✅ Todos los límites dentro de rango');
+    }
+    await cargarRiskDashboard(riskPortfolioId);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function reconocerAlertaRisk(alertId) {
+  try {
+    await fetchJson(`/api/risk/alerts/${alertId}/acknowledge`, { method: 'POST' });
+    await cargarRiskDashboard(riskPortfolioId);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}

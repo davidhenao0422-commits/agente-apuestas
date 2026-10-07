@@ -246,6 +246,50 @@ CREATE INDEX IF NOT EXISTS idx_paper_picks_portfolio ON paper_picks(portfolio_id
 CREATE INDEX IF NOT EXISTS idx_paper_picks_status ON paper_picks(status);
 CREATE INDEX IF NOT EXISTS idx_paper_picks_kickoff ON paper_picks(kickoff);
 CREATE INDEX IF NOT EXISTS idx_paper_settlements_pick ON paper_settlements(pick_id);
+
+-- Risk Management Tables
+CREATE TABLE IF NOT EXISTS risk_limits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    limit_type TEXT NOT NULL,  -- max_exposure_league, max_exposure_market, max_correlation, max_drawdown, stop_loss_pct
+    limit_value REAL NOT NULL,
+    current_value REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(portfolio_id, limit_type)
+);
+
+CREATE TABLE IF NOT EXISTS risk_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    alert_type TEXT NOT NULL,  -- exposure_breach, correlation_high, drawdown_warning, stop_loss_triggered
+    severity TEXT NOT NULL,    -- info, warning, critical
+    message TEXT NOT NULL,
+    metric_value REAL,
+    limit_value REAL,
+    acknowledged INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    acknowledged_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS portfolio_correlations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    pick_id_a INTEGER NOT NULL REFERENCES paper_picks(id),
+    pick_id_b INTEGER NOT NULL REFERENCES paper_picks(id),
+    correlation REAL NOT NULL,
+    shared_team INTEGER DEFAULT 0,      -- 1 if same team involved
+    shared_league INTEGER DEFAULT 0,    -- 1 if same league
+    shared_market INTEGER DEFAULT 0,    -- 1 if same market type
+    calculated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(pick_id_a, pick_id_b)
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_limits_portfolio ON risk_limits(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_risk_alerts_portfolio ON risk_alerts(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_risk_alerts_ack ON risk_alerts(acknowledged);
+CREATE INDEX IF NOT EXISTS idx_correlations_portfolio ON portfolio_correlations(portfolio_id);
 """
 
 
@@ -890,4 +934,77 @@ class Database:
             """SELECT * FROM paper_picks WHERE portfolio_id = ? 
                ORDER BY placed_at DESC LIMIT ?""",
             (portfolio_id, limit),
+        )
+
+    # ---------- Risk Management ----------
+    def set_risk_limit(self, portfolio_id: int, limit_type: str, limit_value: float) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO risk_limits
+               (portfolio_id, limit_type, limit_value, updated_at)
+               VALUES (?, ?, ?, datetime('now'))""",
+            (portfolio_id, limit_type, limit_value),
+        )
+
+    def get_risk_limits(self, portfolio_id: int) -> List[dict]:
+        return self.query(
+            "SELECT * FROM risk_limits WHERE portfolio_id = ? AND is_active = 1",
+            (portfolio_id,),
+        )
+
+    def update_risk_limit_current(self, portfolio_id: int, limit_type: str, current_value: float) -> None:
+        self.execute(
+            "UPDATE risk_limits SET current_value = ?, updated_at = datetime('now') WHERE portfolio_id = ? AND limit_type = ?",
+            (current_value, portfolio_id, limit_type),
+        )
+
+    def create_risk_alert(self, portfolio_id: int, alert_type: str, severity: str,
+                           message: str, metric_value: float = None, limit_value: float = None) -> int:
+        return self.execute(
+            """INSERT INTO risk_alerts
+               (portfolio_id, alert_type, severity, message, metric_value, limit_value)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (portfolio_id, alert_type, severity, message, metric_value, limit_value),
+        )
+
+    def get_risk_alerts(self, portfolio_id: int, acknowledged: int = None, limit: int = 50) -> List[dict]:
+        query = "SELECT * FROM risk_alerts WHERE portfolio_id = ?"
+        params = [portfolio_id]
+        if acknowledged is not None:
+            query += " AND acknowledged = ?"
+            params.append(acknowledged)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        return self.query(query, tuple(params))
+
+    def acknowledge_risk_alert(self, alert_id: int) -> None:
+        self.execute(
+            "UPDATE risk_alerts SET acknowledged = 1, acknowledged_at = datetime('now') WHERE id = ?",
+            (alert_id,),
+        )
+
+    def save_correlation(self, portfolio_id: int, pick_id_a: int, pick_id_b: int,
+                          correlation: float, shared_team: int = 0,
+                          shared_league: int = 0, shared_market: int = 0) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO portfolio_correlations
+               (portfolio_id, pick_id_a, pick_id_b, correlation, shared_team, shared_league, shared_market)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (portfolio_id, pick_id_a, pick_id_b, correlation, shared_team, shared_league, shared_market),
+        )
+
+    def get_portfolio_correlations(self, portfolio_id: int, min_correlation: float = 0.3) -> List[dict]:
+        return self.query(
+            """SELECT * FROM portfolio_correlations 
+               WHERE portfolio_id = ? AND correlation >= ?
+               ORDER BY correlation DESC""",
+            (portfolio_id, min_correlation),
+        )
+
+    def get_pending_picks_for_risk(self, portfolio_id: int) -> List[dict]:
+        """Obtiene picks pendientes con info para análisis de riesgo."""
+        return self.query(
+            """SELECT * FROM paper_picks 
+               WHERE portfolio_id = ? AND status = 'pending'
+               ORDER BY kickoff ASC""",
+            (portfolio_id,),
         )
