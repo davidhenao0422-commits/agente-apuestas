@@ -556,4 +556,127 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#nav-ligas').addEventListener('click', goRegiones);
   $('#nav-proximos').addEventListener('click', goProximos);
   $('#nav-mejores').addEventListener('click', goMejores);
+  $('#nav-bookmakers').addEventListener('click', goBookmakers);
+  
+  // Cargar ligas para el selector de bookmakers
+  cargarLigasBookmakers();
 });
+
+// ===================== BOOKMAKERS RANKING =====================
+
+async function goBookmakers() {
+  mostrar('#view-bookmakers');
+  $('#nav-inicio').classList.remove('active');
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.remove('active');
+  $('#nav-mejores').classList.remove('active');
+  $('#nav-bookmakers').classList.add('active');
+  await cargarBookmakersRanking();
+}
+
+async function cargarLigasBookmakers() {
+  try {
+    const data = await fetchJson('/api/bookmakers/leagues');
+    const select = $('#bm-league-select');
+    if (select && data.leagues) {
+      data.leagues.forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l.league;
+        opt.textContent = `${l.league} (${l.bookmakers_count} books, ${l.total_snapshots} snaps)`;
+        select.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    console.error('Error cargando ligas bookmakers:', e);
+  }
+}
+
+async function cargarBookmakersRanking() {
+  const loading = $('#bm-loading');
+  const errorDiv = $('#bm-error');
+  const tableCard = $('#bm-table-card');
+  const summaryCard = $('#bm-summary-card');
+  const body = $('#bm-ranking-body');
+  const summary = $('#bm-summary');
+  
+  loading.classList.remove('hidden');
+  errorDiv.classList.add('hidden');
+  tableCard.style.display = 'none';
+  summaryCard.style.display = 'none';
+  body.innerHTML = '';
+  
+  try {
+    const league = $('#bm-league-select').value || null;
+    const periodDays = parseInt($('#bm-period-select').value) || 30;
+    const minMarkets = parseInt($('#bm-min-markets-select').value) || 50;
+    const top = 25;
+    
+    const params = new URLSearchParams({
+      period_days: periodDays,
+      top: top,
+      min_markets: minMarkets,
+    });
+    if (league) params.set('league', league);
+    
+    const data = await fetchJson(`/api/bookmakers/ranking?${params.toString()}`);
+    
+    loading.classList.add('hidden');
+    
+    if (!data.ranking || data.ranking.length === 0) {
+      body.innerHTML = '<tr><td colspan="11" class="empty">No hay datos suficientes. Necesitas polling de odds primero.</td></tr>';
+      tableCard.style.display = 'block';
+      return;
+    }
+    
+    // Resumen
+    const avgSharp = (data.ranking.reduce((s, b) => s + b.sharp_factor, 0) / data.ranking.length).toFixed(1);
+    const avgClv = (data.ranking.reduce((s, b) => s + b.clv_beat_rate, 0) / data.ranking.length).toFixed(1);
+    const avgAcc = (data.ranking.reduce((s, b) => s + b.accuracy_score, 0) / data.ranking.length).toFixed(2);
+    const avgCons = (data.ranking.reduce((s, b) => s + b.consistency_score, 0) / data.ranking.length).toFixed(2);
+    
+    summary.innerHTML = `
+      <div class="stat-item"><div class="label">Bookmakers analizados</div><div class="value">${data.ranking.length}</div></div>
+      <div class="stat-item"><div class="label">Sharp Factor promedio</div><div class="value">${avgSharp}</div></div>
+      <div class="stat-item"><div class="label">CLV Beat Rate promedio</div><div class="value">${avgClv}%</div></div>
+      <div class="stat-item"><div class="label">Accuracy promedio</div><div class="value">${avgAcc}</div></div>
+      <div class="stat-item"><div class="label">Consistency promedio</div><div class="value">${avgCons}</div></div>
+      <div class="stat-item"><div class="label">Período</div><div class="value">${periodDays} días</div></div>
+    `;
+    summaryCard.style.display = 'block';
+    
+    // Tabla
+    body.innerHTML = data.ranking.map(bm => {
+      const sharpClass = bm.sharp_factor >= 80 ? 'sharp-elite' : 
+                         bm.sharp_factor >= 65 ? 'sharp-high' : 
+                         bm.sharp_factor >= 50 ? 'sharp-medium' : 'sharp-low';
+      const clvClass = bm.clv_beat_rate >= 60 ? 'clv-high' : 
+                       bm.clv_beat_rate >= 40 ? 'clv-medium' : 'clv-low';
+      const badgesHtml = bm.badges && bm.badges.length 
+        ? bm.badges.map(b => `<span class="bm-badge">${b}</span>`).join(' ')
+        : '—';
+      
+      return `
+        <tr>
+          <td class="rank">${bm.rank}</td>
+          <td class="bookmaker-name"><strong>${bm.bookmaker}</strong></td>
+          <td class="league">${bm.league}</td>
+          <td class="sharp-factor ${sharpClass}">${bm.sharp_factor.toFixed(1)}</td>
+          <td class="clv-score">${(bm.clv_score * 100).toFixed(0)}%</td>
+          <td class="beat-rate ${clvClass}">${bm.clv_beat_rate.toFixed(1)}%</td>
+          <td class="avg-clv">${bm.avg_clv_pct >= 0 ? '+' : ''}${bm.avg_clv_pct.toFixed(2)}%</td>
+          <td class="accuracy">${(bm.accuracy_score * 100).toFixed(0)}%</td>
+          <td class="consistency">${(bm.consistency_score * 100).toFixed(0)}%</td>
+          <td class="markets">${bm.total_markets}</td>
+          <td class="badges">${badgesHtml}</td>
+        </tr>
+      `;
+    }).join('');
+    
+    tableCard.style.display = 'block';
+    
+  } catch (e) {
+    loading.classList.add('hidden');
+    errorDiv.classList.remove('hidden');
+    errorDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
+  }
+}

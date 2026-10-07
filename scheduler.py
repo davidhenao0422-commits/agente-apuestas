@@ -478,6 +478,45 @@ class BettingScheduler:
         except Exception as e:
             logger.error(f"Error enviando resumen steam: {e}")
 
+    # ===================== BOOKMAKER RANKING JOBS =====================
+
+    async def update_bookmaker_scores_job(self):
+        """Job diario: actualiza scores de bookmakers y envía top cambios al canal."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("📊 Actualizando ranking de bookmakers...")
+        try:
+            from analyzers.bookmaker_ranking import create_bookmaker_ranker
+            ranker = create_bookmaker_ranker(self.db)
+            
+            scores = ranker.calculate_all_scores(period_days=30)
+            saved = ranker.save_scores(scores)
+            
+            if not scores:
+                message = "📊 <b>Actualización Bookmakers</b>\n\nNo hay datos suficientes para calcular scores."
+            else:
+                message = f"📊 <b>Ranking Bookmakers Actualizado</b>\n\n"
+                message += f"📈 {len(scores)} bookmakers puntuados | 💾 {saved} guardados\n\n"
+                message += "🏆 <b>Top 5 Sharp Factors:</b>\n"
+                for i, s in enumerate(scores[:5], 1):
+                    sev_emoji = {"extreme": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(
+                        "extreme" if s.sharp_factor >= 80 else "high" if s.sharp_factor >= 65 else "medium" if s.sharp_factor >= 50 else "low", "⚪")
+                    message += (
+                        f"{i}. {sev_emoji} <b>{s.bookmaker}</b> ({s.league})\n"
+                        f"   Sharp: {s.sharp_factor} | CLV: {s.beat_rate:.1f}% | Acc: {s.accuracy_score:.0%}\n"
+                    )
+            
+            await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("✅ Ranking de bookmakers actualizado y notificado")
+            
+        except Exception as e:
+            logger.error(f"Error actualizando bookmaker scores: {e}")
+
 
 def run_scheduler():
     scheduler = BettingScheduler()
@@ -501,6 +540,10 @@ def run_scheduler():
         await scheduler.init_bot()
         await scheduler.steam_summary_job()
     
+    async def bookmaker_scores_task():
+        await scheduler.init_bot()
+        await scheduler.update_bookmaker_scores_job()
+    
     print("\n" + "=" * 50)
     print("SCHEDULER CONFIGURADO")
     print("=" * 50)
@@ -508,6 +551,7 @@ def run_scheduler():
     print("📊 Polling odds (snapshots): cada 10 min")
     print("⚡ Detección steam moves: cada 15 min")
     print("📈 Resumen steam diario: 23:00")
+    print("📊 Ranking bookmakers: 02:00 AM")
     print("=" * 50)
     print("También puedes ejecutar la tarea diaria manualmente ahora.\n")
     
@@ -520,6 +564,7 @@ def run_scheduler():
     schedule.every(10).minutes.do(scheduler.poll_odds_job)
     schedule.every(15).minutes.do(lambda: asyncio.run(steam_detection_task()))
     schedule.every().day.at("23:00").do(lambda: asyncio.run(steam_summary_task()))
+    schedule.every().day.at("02:00").do(lambda: asyncio.run(bookmaker_scores_task()))
     
     print("\nScheduler ejecutándose. Presiona Ctrl+C para detener.")
     while True:

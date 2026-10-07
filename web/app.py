@@ -1615,3 +1615,98 @@ def trigger_odds_poll():
     
     saved = poll_and_store_odds(db, odds_client)
     return {"polling_completed": True, "snapshots_saved": saved}
+
+
+# ===================== BOOKMAKER RANKING ENDPOINTS =====================
+
+@app.get("/api/bookmakers/ranking")
+def get_bookmakers_ranking(
+    league: str = None,
+    period_days: int = 30,
+    top: int = 20,
+    min_markets: int = 50
+):
+    """Ranking de bookmakers por Sharp Factor (CLV + Accuracy + Consistency + Volume).
+    
+    Args:
+        league: Filtrar por liga (ej: PD, PL, SA, BL1, FL1)
+        period_days: Ventana temporal (default 30 días)
+        top: Top N bookmakers
+        min_markets: Mínimo mercados para calificar
+    """
+    from analyzers.bookmaker_ranking import create_bookmaker_ranker
+    db = _get_db()
+    ranker = create_bookmaker_ranker(db)
+    
+    ranking = ranker.get_ranking(league=league, period_days=period_days, top=top)
+    
+    # Añadir badges por categorías
+    for bm in ranking:
+        bm["badges"] = []
+        if bm["clv_beat_rate"] > 60:
+            bm["badges"].append("🏆 CLV King")
+        if bm["accuracy_score"] > 0.8:
+            bm["badges"].append("🎯 Precisión")
+        if bm["consistency_score"] > 0.8:
+            bm["badges"].append("📏 Consistencia")
+        if bm["total_markets"] > 500:
+            bm["badges"].append("🌊 Volumen")
+    
+    return {
+        "ranking": ranking,
+        "count": len(ranking),
+        "params": {"league": league, "period_days": period_days, "top": top, "min_markets": min_markets},
+        "weights": {"clv": 0.40, "accuracy": 0.25, "consistency": 0.20, "volume": 0.15},
+    }
+
+
+@app.get("/api/bookmakers/{bookmaker}/detail")
+def get_bookmaker_detail(bookmaker: str, league: str = None, period_days: int = 30):
+    """Detalle completo de métricas de un bookmaker específico."""
+    from analyzers.bookmaker_ranking import create_bookmaker_ranker
+    db = _get_db()
+    ranker = create_bookmaker_ranker(db)
+    
+    detail = ranker.get_bookmaker_detail(bookmaker, league=league, period_days=period_days)
+    
+    if not detail:
+        raise HTTPException(404, detail=f"Bookmaker '{bookmaker}' no encontrado o datos insuficientes")
+    
+    return detail
+
+
+@app.post("/api/bookmakers/refresh-scores")
+def refresh_bookmaker_scores(period_days: int = 30, min_markets: int = 50):
+    """Recalcula y guarda scores de todos los bookmakers (job manual)."""
+    from analyzers.bookmaker_ranking import create_bookmaker_ranker
+    db = _get_db()
+    ranker = create_bookmaker_ranker(db)
+    
+    scores = ranker.calculate_all_scores(period_days=period_days, min_markets=min_markets)
+    saved = ranker.save_scores(scores)
+    
+    return {
+        "refreshed": True,
+        "bookmakers_scored": len(scores),
+        "saved_to_db": saved,
+        "period_days": period_days,
+        "top_5": [
+            {"rank": s.rank, "bookmaker": s.bookmaker, "league": s.league, "sharp_factor": s.sharp_factor}
+            for s in scores[:5]
+        ],
+    }
+
+
+@app.get("/api/bookmakers/leagues")
+def get_bookmaker_leagues():
+    """Ligas disponibles con datos de bookmakers."""
+    db = _get_db()
+    leagues = db.query(
+        """SELECT DISTINCT league, COUNT(DISTINCT bookmaker) as bookmakers_count,
+                  COUNT(*) as total_snapshots
+           FROM odds_snapshots 
+           WHERE is_sharp = 1
+           GROUP BY league
+           ORDER BY total_snapshots DESC"""
+    )
+    return {"leagues": leagues, "count": len(leagues)}
