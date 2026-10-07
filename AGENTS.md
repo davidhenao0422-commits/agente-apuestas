@@ -20,7 +20,7 @@ Aplicación web y bot de Telegram que genera **recomendaciones de apuestas basad
 - **URL:** https://agente-apuestas.onrender.com
 - **Hosting:** Render Free ($0 para siempre)
 - **GitHub:** https://github.com/davidhenao0422-commits/agente-apuestas
-- **API Key:** aa60ccff49a0ae41375c0cb6246e317d
+- **API Key:** `${API_FOOTBALL_KEY}` (ver `.env`)
 - **Fecha:** 2026-10-06
 - **Estado:** ✅ En línea (deploy automático desde main)
 - **Último commit:** 89a03cf - feat: ensemble predictor + transparency + monte carlo + odds aggregator
@@ -482,7 +482,7 @@ CREATE TABLE bookmaker_scores (
 TELEGRAM_BOT_TOKEN=
 
 # API-Football
-API_FOOTBALL_KEY=aa60ccff49a0ae41375c0cb6246e317d
+API_FOOTBALL_KEY=
 API_FOOTBALL_BASE_URL=https://v3.football.api-sports.io
 
 # Football-data.org (opcional)
@@ -621,14 +621,12 @@ Las recomendaciones son de naturaleza **estadística** y **no garantizan resulta
 
 ---
 
----
-
 ## Bot de Telegram - Configuración Completada
 
 ### Bot Creado
 - **Nombre:** Fútbol Pronóstico
 - **Username:** @futbol_stats_2024_bot
-- **Token:** 8965821862:AAGloUorPwlrjysPVgmSp1lOGHSRVNaSRoM
+- **Token:** `${TELEGRAM_BOT_TOKEN}` (ver `.env`)
 - **Fecha creación:** 2026-10-01
 
 ### Canal de Recomendaciones
