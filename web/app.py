@@ -936,17 +936,18 @@ def value_bets_liga(league_code: str, bankroll: float = 1000, kelly_frac: float 
 
 
 @app.get("/api/mejores-apuestas")
-def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3, demo: bool = False, days_ahead: int = 0, fast: bool = False):
+def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_edge: float = 0.02, max_per_league: int = 3, demo: bool = False, days_ahead: int = 0, fast: bool = True):
     """Mejores value bets del día TODAS las ligas combinadas.
     
     Si demo=true: genera partidos simulados para testing de la UI.
     days_ahead: 0 = solo hoy, 1 = hoy + mañana (default), 2 = hoy + 2 días
+    fast=true (default): solo ligas prioritarias, sin odds API, max 30 partidos
     """
-    from catalog import get_regions, get_leagues_by_region, get_league_info
+    from catalog import get_regions, get_leagues_by_region, get_league_info, CATALOGO
     from datetime import date, timedelta
     from predictors.recommendations import kelly_fraction
     
-    # MODO DEMO: datos simulados para testing UI
+    # MODO DEMO: datos simulados para testing de la UI
     if demo:
         demo_matches = [
             {"league": "La Liga (España)", "league_code": "PD", "match": "Real Madrid vs Barcelona", "home": "Real Madrid", "away": "Barcelona"},
@@ -1076,10 +1077,14 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
     # MODO REAL: API-Football + Odds API
     from collectors.api_football import APIFootballClient
     from collectors.odds_api import OddsAPIClient
+    from catalog import CATALOGO
     db = _get_db()
     api = APIFootballClient(db)
     odds_client = OddsAPIClient(db)
     svc = _get_stats_service()
+    
+    # Ligas prioritarias (las 6 principales) para ahorrar API quota
+    PRIORITY_LEAGUES = {"PD", "PL", "SA", "BL1", "FL1", "CL"}
     
     # Obtener partidos de HOY + MAÑANA (según days_ahead)
     all_fixtures = []
@@ -1098,48 +1103,71 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
             "message": f"No hay partidos en los próximos {days_ahead + 1} día(s)",
         }
     
-    # Modo FAST: saltar odds API y limitar partidos procesados
+    # Filtrar solo ligas de nuestro catálogo (y prioridad si fast)
+    all_teams_by_league = _get_all_teams_by_league()
+    filtered_fixtures = []
+    for fix in all_fixtures:
+        teams_info = fix.get("teams", {})
+        home_name = teams_info.get("home", {}).get("name", "")
+        away_name = teams_info.get("away", {}).get("name", "")
+        if not home_name or not away_name:
+            continue
+        # Buscar liga en catálogo
+        matched_lcode = None
+        for lcode, linf in all_teams_by_league.items():
+            if home_name in linf["teams"] and away_name in linf["teams"]:
+                matched_lcode = lcode
+                break
+        if matched_lcode:
+            if fast and matched_lcode not in PRIORITY_LEAGUES:
+                continue
+            fix["_matched_league_code"] = matched_lcode
+            filtered_fixtures.append(fix)
+    
+    if not filtered_fixtures:
+        return {
+            "date": date.today().isoformat(),
+            "total_analyzed": 0,
+            "top_bets": [],
+            "params": {"bankroll": bankroll, "kelly_frac": kelly_frac, "min_edge": min_edge, "days_ahead": days_ahead, "fast": fast},
+            "message": "No hay partidos de ligas seguidas en los próximos días",
+        }
+    
+    # Modo FAST: limitar partidos, saltar odds API
     if fast:
-        all_fixtures = all_fixtures[:30]
+        all_fixtures = filtered_fixtures[:30]
         odds_by_league = {}
     else:
         # Obtener odds reales de The Odds API por cada liga que tenga partidos
         from config import Config
         odds_api_key = Config.ODDS_API_KEY
-        odds_by_league = {}  # {league_code: {match_key: odds_data}}
+        odds_by_league = {}
         if odds_api_key:
-        leagues_with_fixtures = set()
-        for fix in all_fixtures:
-            teams_info = fix.get("teams", {})
-            league_info_api = fix.get("league", {})
-            home_name = teams_info.get("home", {}).get("name", "")
-            away_name = teams_info.get("away", {}).get("name", "")
-            for lcode, linf in _get_all_teams_by_league().items():
-                if home_name in linf["teams"] and away_name in linf["teams"]:
+            leagues_with_fixtures = set()
+            for fix in filtered_fixtures:
+                lcode = fix.get("_matched_league_code")
+                if lcode:
                     leagues_with_fixtures.add(lcode)
-                    break
-        
-        for lcode in leagues_with_fixtures:
-            try:
-                odds_matches = odds_client.get_odds(lcode)
-                if odds_matches:
-                    odds_by_league[lcode] = {}
-                    for om in odds_matches:
-                        match_key = f"{om['home_team']}|{om['away_team']}"
-                        odds_by_league[lcode][match_key] = om
-            except Exception as e:
-                logger.warning(f"Error obteniendo odds para {lcode}: {e}")
-    
-    # Construir mapa de todos los equipos de nuestro catálogo por liga
-    all_teams_by_league = _get_all_teams_by_league()
+            
+            for lcode in leagues_with_fixtures:
+                try:
+                    odds_matches = odds_client.get_odds(lcode)
+                    if odds_matches:
+                        odds_by_league[lcode] = {}
+                        for om in odds_matches:
+                            match_key = f"{om['home_team']}|{om['away_team']}"
+                            odds_by_league[lcode][match_key] = om
+                except Exception as e:
+                    logger.warning(f"Error obteniendo odds para {lcode}: {e}")
+        # Usar todos los partidos filtrados (sin límite 30)
+        all_fixtures = filtered_fixtures
     
     all_value_bets = []
     
-    # Procesar cada partido (hoy + mañana)
+    # Procesar cada partido
     for fix in all_fixtures[:80]:
         teams = fix.get("teams", {})
         fixture_info = fix.get("fixture", {})
-        league_info_api = fix.get("league", {})
         
         home_name = teams.get("home", {}).get("name", "")
         away_name = teams.get("away", {}).get("name", "")
@@ -1147,15 +1175,12 @@ def mejores_apuestas_dia(bankroll: float = 1000, kelly_frac: float = 0.25, min_e
         if not home_name or not away_name:
             continue
         
-        matched_league_code = None
-        matched_league_info = None
-        for lcode, linf in all_teams_by_league.items():
-            if home_name in linf["teams"] and away_name in linf["teams"]:
-                matched_league_code = lcode
-                matched_league_info = linf
-                break
-        
+        # Usar liga ya pre-filtrada
+        matched_league_code = fix.get("_matched_league_code")
         if not matched_league_code:
+            continue
+        matched_league_info = all_teams_by_league.get(matched_league_code)
+        if not matched_league_info:
             continue
         
         home_stats = svc.get_team_stats(home_name, matched_league_code)
