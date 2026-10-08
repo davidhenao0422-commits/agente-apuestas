@@ -381,6 +381,58 @@ CREATE INDEX IF NOT EXISTS idx_ab_experiments_status ON ab_experiments(status);
 CREATE INDEX IF NOT EXISTS idx_feature_store_group ON feature_store(feature_group);
 CREATE INDEX IF NOT EXISTS idx_predictions_log_model ON model_predictions_log(model_version_id);
 CREATE INDEX IF NOT EXISTS idx_predictions_log_match ON model_predictions_log(match_id);
+
+-- Advanced Analytics Tables
+CREATE TABLE IF NOT EXISTS analytics_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_type TEXT NOT NULL,  -- attribution, regime, stress_test, monte_carlo, factor_analysis
+    portfolio_id INTEGER REFERENCES paper_portfolio(id),
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    data TEXT NOT NULL,  -- JSON con resultados completos
+    summary TEXT,        -- JSON resumen ejecutivo
+    generated_at TEXT DEFAULT (datetime('now')),
+    status TEXT DEFAULT 'completed',  -- generating, completed, failed
+    UNIQUE(report_type, portfolio_id, period_start, period_end)
+);
+
+CREATE TABLE IF NOT EXISTS regime_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    regime_type TEXT NOT NULL,  -- bull, bear, volatile, calm, trending, mean_reverting
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    metrics TEXT NOT NULL,  -- JSON: volatility, trend_strength, avg_correlation, sharpe
+    description TEXT,
+    detected_at TEXT DEFAULT (datetime('now')),
+    confidence REAL,
+);
+
+CREATE TABLE IF NOT EXISTS stress_test_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    scenario_name TEXT NOT NULL,  -- market_crash, high_volatility, correlated_losses, liquidity_crisis
+    parameters TEXT NOT NULL,     -- JSON params del escenario
+    results TEXT NOT NULL,        -- JSON: max_dd, var, expected_shortfall, survival_prob
+    runs INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+);
+
+CREATE TABLE IF NOT EXISTS factor_analysis_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER REFERENCES paper_portfolio(id),
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    factors TEXT NOT NULL,        -- JSON: factor_name -> {exposure, contribution, t_stat, p_value}
+    r_squared REAL,
+    method TEXT,                  -- pca, regression, fundamental
+    created_at TEXT DEFAULT (datetime('now')),
+);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_reports_type ON analytics_reports(report_type);
+CREATE INDEX IF NOT EXISTS idx_analytics_reports_portfolio ON analytics_reports(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_regime_history_type ON regime_history(regime_type);
+CREATE INDEX IF NOT EXISTS idx_stress_test_portfolio ON stress_test_results(portfolio_id);
+CREATE INDEX IF NOT EXISTS idx_factor_analysis_portfolio ON factor_analysis_results(portfolio_id);
 """
 
 
@@ -1342,4 +1394,131 @@ class Database:
         rows = self.query(query, tuple(params))
         for row in rows:
             row["prediction"] = json.loads(row["prediction"])
+        return rows
+
+    # ---------- Advanced Analytics ----------
+    def save_analytics_report(self, report: dict) -> int:
+        return self.execute(
+            """INSERT OR REPLACE INTO analytics_reports
+               (report_type, portfolio_id, period_start, period_end, data, summary, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                report.get("report_type"),
+                report.get("portfolio_id"),
+                report.get("period_start"),
+                report.get("period_end"),
+                json.dumps(report.get("data", {})),
+                json.dumps(report.get("summary", {})),
+                report.get("status", "completed"),
+            ),
+        )
+
+    def get_analytics_reports(self, report_type: str = None, portfolio_id: int = None, limit: int = 50) -> List[dict]:
+        query = "SELECT * FROM analytics_reports WHERE 1=1"
+        params = []
+        if report_type:
+            query += " AND report_type = ?"
+            params.append(report_type)
+        if portfolio_id:
+            query += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        query += " ORDER BY generated_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["data"] = json.loads(row["data"])
+            if row["summary"]:
+                row["summary"] = json.loads(row["summary"])
+        return rows
+
+    def save_regime(self, regime: dict) -> int:
+        return self.execute(
+            """INSERT INTO regime_history
+               (regime_type, start_date, end_date, metrics, description, confidence)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                regime.get("regime_type"),
+                regime.get("start_date"),
+                regime.get("end_date"),
+                json.dumps(regime.get("metrics", {})),
+                regime.get("description"),
+                regime.get("confidence"),
+            ),
+        )
+
+    def get_regime_history(self, regime_type: str = None, limit: int = 50) -> List[dict]:
+        query = "SELECT * FROM regime_history WHERE 1=1"
+        params = []
+        if regime_type:
+            query += " AND regime_type = ?"
+            params.append(regime_type)
+        query += " ORDER BY start_date DESC LIMIT ?"
+        params.append(limit)
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["metrics"] = json.loads(row["metrics"])
+        return rows
+
+    def get_current_regime(self) -> Optional[dict]:
+        row = self.query_one(
+            "SELECT * FROM regime_history WHERE end_date IS NULL ORDER BY start_date DESC LIMIT 1"
+        )
+        if row:
+            row["metrics"] = json.loads(row["metrics"])
+        return row
+
+    def save_stress_test(self, result: dict) -> int:
+        return self.execute(
+            """INSERT INTO stress_test_results
+               (portfolio_id, scenario_name, parameters, results, runs)
+               VALUES (?, ?, ?, ?, ?)""",
+            (
+                result.get("portfolio_id"),
+                result.get("scenario_name"),
+                json.dumps(result.get("parameters", {})),
+                json.dumps(result.get("results", {})),
+                result.get("runs", 0),
+            ),
+        )
+
+    def get_stress_tests(self, portfolio_id: int = None, limit: int = 50) -> List[dict]:
+        query = "SELECT * FROM stress_test_results WHERE 1=1"
+        params = []
+        if portfolio_id:
+            query += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["parameters"] = json.loads(row["parameters"])
+            row["results"] = json.loads(row["results"])
+        return rows
+
+    def save_factor_analysis(self, analysis: dict) -> int:
+        return self.execute(
+            """INSERT INTO factor_analysis_results
+               (portfolio_id, period_start, period_end, factors, r_squared, method)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                analysis.get("portfolio_id"),
+                analysis.get("period_start"),
+                analysis.get("period_end"),
+                json.dumps(analysis.get("factors", {})),
+                analysis.get("r_squared"),
+                analysis.get("method"),
+            ),
+        )
+
+    def get_factor_analysis(self, portfolio_id: int = None, limit: int = 10) -> List[dict]:
+        query = "SELECT * FROM factor_analysis_results WHERE 1=1"
+        params = []
+        if portfolio_id:
+            query += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self.query(query, tuple(params))
+        for row in rows:
+            row["factors"] = json.loads(row["factors"])
         return rows

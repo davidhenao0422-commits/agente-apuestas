@@ -692,6 +692,77 @@ class BettingScheduler:
             logger.error(f"Error generando resumen risk management: {e}")
 
 
+await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("✅ ML Pipeline: reentrenamiento semanal completado")
+            
+        except Exception as e:
+            logger.error(f"Error en ML pipeline retrain: {e}")
+
+    async def ml_retrain_job(self):
+        """Wrapper para job programado."""
+        await self.init_bot()
+        await self.ml_retrain_task()
+
+    # ===================== ANALYTICS JOBS =====================
+
+    async def analytics_report_job(self):
+        """Job semanal: genera reporte completo de analytics para todos los portfolios."""
+        if not self.bot or not self.channel_id:
+            return
+
+        logger.info("📊 Analytics: generando reporte semanal...")
+        try:
+            from analyzers.analytics import create_analytics_engine
+            engine = create_analytics_engine(self.db)
+            
+            portfolios = self.db.get_all_portfolios()
+            active_portfolios = [p for p in portfolios if p.get("is_active")]
+            
+            if not active_portfolios:
+                return
+            
+            message = "📊 <b>Analytics - Reporte Semanal</b>\n\n"
+            
+            for portfolio in active_portfolios[:3]:  # Top 3 portfolios
+                result = engine.generate_full_report(portfolio["id"], period_days=7)
+                summary = result["summary"]
+                
+                km = summary["key_metrics"]
+                roi_emoji = "🟢" if km.get("roi", 0) >= 0 else "🔴"
+                
+                message += (
+                    f"{roi_emoji} <b>{portfolio['name']}</b> (7d)\n"
+                    f"   ROI: {km.get('roi', 0):+.2f}% | Régimen: {km.get('current_regime', 'N/A')}\n"
+                    f"   Supervivencia Normal: {km.get('survival_normal', 0):.0%} | Crash: {km.get('survival_crash', 0):.0%}\n"
+                    f"   Rentable 90d: {km.get('prob_profitable_90d', 0):.0%} | Ruin: {km.get('risk_of_ruin', 0):.1f}%\n\n"
+                )
+                
+                if summary["risk_alerts"]:
+                    for alert in summary["risk_alerts"][:2]:
+                        message += f"   ⚠️ {alert}\n"
+                
+                message += "\n"
+            
+            await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode="HTML"
+            )
+            logger.info("✅ Analytics: reporte semanal enviado")
+            
+        except Exception as e:
+            logger.error(f"Error generando reporte analytics: {e}")
+
+    async def analytics_report_wrapper(self):
+        """Wrapper para job programado."""
+        await self.init_bot()
+        await self.analytics_report_job()
+
+
 def run_scheduler():
     scheduler = BettingScheduler()
     
@@ -808,6 +879,7 @@ def run_scheduler():
     print("🛡️ Risk Management monitoring: cada 15 min")
     print("🛡️ Risk Management resumen: 06:00 AM")
     print("🤖 ML Pipeline retrain: domingos 03:00 AM")
+    print("📊 Analytics report: lunes 04:00 AM")
     print("=" * 50)
     print("También puedes ejecutar la tarea diaria manualmente ahora.\n")
     
@@ -826,6 +898,7 @@ def run_scheduler():
     schedule.every(15).minutes.do(lambda: asyncio.run(risk_monitoring_task()))
     schedule.every().day.at("06:00").do(lambda: asyncio.run(risk_summary_task()))
     schedule.every().sunday.at("03:00").do(lambda: asyncio.run(ml_retrain_task()))
+    schedule.every().monday.at("04:00").do(lambda: asyncio.run(analytics_report_wrapper()))
     
     print("\nScheduler ejecutándose. Presiona Ctrl+C para detener.")
     while True:

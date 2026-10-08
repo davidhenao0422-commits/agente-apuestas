@@ -1623,3 +1623,394 @@ async function optimizarEnsemble() {
     resultDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
   }
 }
+
+// ===================== ANALYTICS =====================
+
+async function goAnalytics() {
+  mostrar('#view-analytics');
+  $('#nav-inicio').classList.remove('active');
+  $('#nav-ligas').classList.remove('active');
+  $('#nav-proximos').classList.remove('active');
+  $('#nav-mejores').classList.remove('active');
+  $('#nav-bookmakers').classList.remove('active');
+  $('#nav-paper').classList.remove('active');
+  $('#nav-risk').classList.remove('active');
+  $('#nav-ml').classList.remove('active');
+  $('#nav-analytics').classList.add('active');
+  
+  await cargarAnalyticsPortfolio();
+}
+
+async function cargarAnalyticsPortfolio() {
+  try {
+    const data = await fetchJson('/api/paper/portfolios');
+    
+    if (data.portfolios && data.portfolios.length > 0) {
+      const active = data.portfolios.find(p => p.is_active) || data.portfolios[0];
+      analyticsPortfolioId = active.id;
+      mostrarAnalyticsPortfolio(active);
+      await cargarAnalyticsDashboard(analyticsPortfolioId);
+    } else {
+      $('#an-portfolio-info').innerHTML = '<div class="empty">No hay portfolios. Ve a Paper Trading para crear uno.</div>';
+    }
+  } catch (e) {
+    console.error('Error cargando portfolio analytics:', e);
+  }
+}
+
+let analyticsPortfolioId = null;
+
+function mostrarAnalyticsPortfolio(p) {
+  const info = $('#an-portfolio-info');
+  const initial = parseFloat(p.initial_bankroll);
+  const current = parseFloat(p.current_bankroll);
+  const totalReturn = ((current - initial) / initial * 100).toFixed(2);
+  const returnClass = totalReturn >= 0 ? '' : 'edge-baja';
+  
+  info.innerHTML = `
+    <div class="stat-item"><div class="label">Portfolio</div><div class="value">${p.name}</div></div>
+    <div class="stat-item"><div class="label">Inicial</div><div class="value">${initial.toFixed(2)} ${p.currency}</div></div>
+    <div class="stat-item"><div class="label">Actual</div><div class="value">${current.toFixed(2)} ${p.currency}</div></div>
+    <div class="stat-item"><div class="label">Retorno Total</div><div class="value ${returnClass}">${totalReturn >= 0 ? '+' : ''}${totalReturn}%</div></div>
+  `;
+  
+  $('#an-kpi-card').style.display = 'block';
+  $('#an-attr-card').style.display = 'block';
+  $('#an-regime-card').style.display = 'block';
+  $('#an-stress-card').style.display = 'block';
+  $('#an-mc-card').style.display = 'block';
+  $('#an-factor-card').style.display = 'block';
+  $('#an-report-card').style.display = 'block';
+}
+
+async function cargarAnalyticsDashboard(portfolioId) {
+  try {
+    const periodDays = parseInt($('#an-period-select').value) || 30;
+    
+    // Cargar attribution y regime en paralelo
+    const [attrData, regimeData] = await Promise.all([
+      fetchJson(`/api/analytics/attribution/${portfolioId}?period_days=${periodDays}`),
+      fetchJson(`/api/analytics/regime?portfolio_id=${portfolioId}&lookback_days=60`),
+    ]);
+    
+    // KPIs
+    const kpiGrid = $('#an-kpi-grid');
+    kpiGrid.innerHTML = `
+      <div class="stat-item"><div class="label">ROI Total</div><div class="value ${attrData.total_roi >= 0 ? '' : 'edge-baja'}">${attrData.total_roi >= 0 ? '+' : ''}${attrData.total_roi.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">P&L Total</div><div class="value ${attrData.total_pnl >= 0 ? '' : 'edge-baja'}">${attrData.total_pnl >= 0 ? '+' : ''}${attrData.total_pnl.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">Régimen</div><div class="value">${regimeData.regime_type}</div></div>
+      <div class="stat-item"><div class="label">Confianza</div><div class="value">${(regimeData.confidence * 100).toFixed(0)}%</div></div>
+      <div class="stat-item"><div class="label">Sharpe</div><div class="value">${regimeData.metrics.sharpe?.toFixed(2) || '—'}</div></div>
+      <div class="stat-item"><div class="label">Volatilidad</div><div class="value">${regimeData.metrics.volatility?.toFixed(2) || '—'}€</div></div>
+      <div class="stat-item"><div class="label">Selection Effect</div><div class="value">${attrData.selection_effect >= 0 ? '+' : ''}${attrData.selection_effect.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Allocation Effect</div><div class="value">${attrData.allocation_effect >= 0 ? '+' : ''}${attrData.allocation_effect.toFixed(2)}%</div></div>
+    `;
+    
+    // Atribución por defecto (modelo)
+    renderAttribution(attrData);
+    
+    // Régimen
+    renderRegime(regimeData);
+    
+    // Historial de regímenes
+    await cargarRegimeHistory();
+    
+  } catch (e) {
+    console.error('Error cargando analytics dashboard:', e);
+  }
+}
+
+function renderAttribution(attrData) {
+  const dim = $('#an-attr-dim').value;
+  const data = attrData[dim] || {};
+  const body = $('#an-attr-body');
+  
+  body.innerHTML = Object.entries(data).map(([key, val]) => {
+    const pnlClass = val.pnl >= 0 ? '' : 'edge-baja';
+    return `
+      <tr>
+        <td><strong>${key}</strong></td>
+        <td>${val.picks}</td>
+        <td>${val.staked.toFixed(2)}€</td>
+        <td class="${pnlClass}">${val.pnl >= 0 ? '+' : ''}${val.pnl.toFixed(2)}€</td>
+        <td class="${pnlClass}">${val.roi >= 0 ? '+' : ''}${val.roi.toFixed(2)}%</td>
+        <td>${val.win_rate.toFixed(1)}%</td>
+        <td><strong>${val.contribution_pct.toFixed(1)}%</strong></td>
+      </tr>
+    `;
+  }).join('');
+  
+  // Brinson effects
+  const brinsonDiv = $('#an-brinson');
+  brinsonDiv.innerHTML = `
+    <div class="stat-item"><div class="label">Selection Effect</div><div class="value ${attrData.selection_effect >= 0 ? '' : 'edge-baja'}">${attrData.selection_effect >= 0 ? '+' : ''}${attrData.selection_effect.toFixed(2)}%</div></div>
+    <div class="stat-item"><div class="label">Allocation Effect</div><div class="value ${attrData.allocation_effect >= 0 ? '' : 'edge-baja'}">${attrData.allocation_effect >= 0 ? '+' : ''}${attrData.allocation_effect.toFixed(2)}%</div></div>
+    <div class="stat-item"><div class="label">Interaction Effect</div><div class="value ${attrData.interaction_effect >= 0 ? '' : 'edge-baja'}">${attrData.interaction_effect >= 0 ? '+' : ''}${attrData.interaction_effect.toFixed(2)}%</div></div>
+    <div class="stat-item"><div class="label">Luck (Residual)</div><div class="value ${attrData.by_luck.luck_pct >= 0 ? '' : 'edge-baja'}">${attrData.by_luck.luck_pct >= 0 ? '+' : ''}${attrData.by_luck.luck_pct.toFixed(1)}%</div></div>
+  `;
+}
+
+async function cargarRegimeHistory() {
+  try {
+    const data = await fetchJson('/api/analytics/regime/history?limit=20');
+    const body = $('#an-regime-body');
+    
+    if (!data.regimes || data.regimes.length === 0) {
+      body.innerHTML = '<tr><td colspan="8" class="empty">No hay historial de regímenes</td></tr>';
+      return;
+    }
+    
+    body.innerHTML = data.regimes.map(r => {
+      const metrics = r.metrics || {};
+      const confClass = r.confidence >= 0.7 ? 'status-won' : r.confidence >= 0.5 ? 'status-pending' : 'status-lost';
+      return `
+        <tr>
+          <td><strong>${r.regime_type}</strong></td>
+          <td>${new Date(r.start_date).toLocaleDateString('es', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+          <td>${r.end_date ? new Date(r.end_date).toLocaleDateString('es') : 'Activo'}</td>
+          <td><span class="${confClass}">${(r.confidence * 100).toFixed(0)}%</span></td>
+          <td>${metrics.volatility?.toFixed(2) || '—'}€</td>
+          <td>${metrics.sharpe?.toFixed(2) || '—'}</td>
+          <td>${metrics.trend_strength?.toFixed(2) || '—'}</td>
+          <td>${metrics.win_rate ? (metrics.win_rate * 100).toFixed(1) + '%' : '—'}</td>
+        </tr>
+      `;
+    }).join('');
+  } catch (e) {
+    console.error('Error cargando regime history:', e);
+  }
+}
+
+function renderRegime(regimeData) {
+  const infoDiv = $('#an-regime-info');
+  const metrics = regimeData.metrics || {};
+  const regimeClass = regimeData.regime_type === 'bull' ? 'value' : 
+                      regimeData.regime_type === 'bear' ? 'edge-baja' : 
+                      regimeData.regime_type === 'volatile' ? 'edge-baja' : '';
+  
+  infoDiv.innerHTML = `
+    <div class="stat-item"><div class="label">Régimen Actual</div><div class="value ${regimeClass}">${regimeData.regime_type.toUpperCase()}</div></div>
+    <div class="stat-item"><div class="label">Confianza</div><div class="value">${(regimeData.confidence * 100).toFixed(0)}%</div></div>
+    <div class="stat-item"><div class="label">Desde</div><div class="value">${new Date(regimeData.start_date).toLocaleDateString('es', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</div></div>
+    <div class="stat-item"><div class="label">Volatilidad Diaria</div><div class="value">${metrics.volatility?.toFixed(2) || '—'}€</div></div>
+    <div class="stat-item"><div class="label">Sharpe</div><div class="value">${metrics.sharpe?.toFixed(2) || '—'}</div></div>
+    <div class="stat-item"><div class="label">Trend Strength</div><div class="value">${metrics.trend_strength?.toFixed(2) || '—'}</div></div>
+    <div class="stat-item"><div class="label">Win Rate</div><div class="value">${metrics.win_rate ? (metrics.win_rate * 100).toFixed(1) + '%' : '—'}</div></div>
+    <div class="stat-item"><div class="label">Correlación Promedio</div><div class="value">${metrics.avg_correlation?.toFixed(2) || '—'}</div></div>
+    <div class="stat-item" style="grid-column: 1/-1;"><div class="label">Descripción</div><div class="value" style="font-size:13px;color:var(--muted)">${regimeData.description}</div></div>
+  `;
+}
+
+async function ejecutarStressTest() {
+  if (!analyticsPortfolioId) return;
+  
+  const loading = $('#an-stress-loading');
+  const resultDiv = $('#an-stress-result');
+  const gridDiv = $('#an-stress-grid');
+  
+  loading.classList.remove('hidden');
+  resultDiv.classList.add('hidden');
+  gridDiv.style.display = 'none';
+  
+  try {
+    const scenario = $('#an-stress-scenario').value;
+    const runs = parseInt($('#an-stress-runs').value) || 1000;
+    
+    const result = await fetchJson('/api/analytics/stress-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        portfolio_id: analyticsPortfolioId, 
+        scenario, 
+        runs 
+      })
+    });
+    
+    loading.classList.add('hidden');
+    resultDiv.classList.remove('hidden');
+    gridDiv.style.display = 'grid';
+    
+    resultDiv.innerHTML = `<strong>✅ Stress Test completado: ${scenario}</strong> (${runs} simulaciones)`;
+    
+    gridDiv.innerHTML = `
+      <div class="stat-item"><div class="label">Max Drawdown P95</div><div class="value edge-baja">${result.max_drawdown.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">VaR 95%</div><div class="value edge-baja">${result.var_95.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Expected Shortfall</div><div class="value edge-baja">${result.expected_shortfall.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Prob. Supervivencia</div><div class="value ${result.survival_probability >= 0.95 ? '' : result.survival_probability >= 0.8 ? 'value' : 'edge-baja'}">${(result.survival_probability * 100).toFixed(1)}%</div></div>
+      <div class="stat-item"><div class="label">Bankroll Mediano Final</div><div class="value">${result.median_final_bankroll.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">Peor Caso</div><div class="value edge-baja">${result.worst_case_bankroll.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">Tiempo Recuperación</div><div class="value">${result.recovery_time_days.toFixed(1)} días</div></div>
+    `;
+    
+  } catch (e) {
+    loading.classList.add('hidden');
+    resultDiv.classList.remove('hidden');
+    resultDiv.classList.add('notice');
+    resultDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
+  }
+}
+
+async function ejecutarMonteCarlo() {
+  if (!analyticsPortfolioId) return;
+  
+  const loading = $('#an-mc-loading');
+  const gridDiv = $('#an-mc-grid');
+  
+  loading.classList.remove('hidden');
+  gridDiv.style.display = 'none';
+  
+  try {
+    const sims = parseInt($('#an-mc-sims').value) || 1000;
+    const horizon = parseInt($('#an-mc-horizon').value) || 90;
+    
+    const result = await fetchJson('/api/analytics/monte-carlo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        portfolio_id: analyticsPortfolioId, 
+        num_sims: sims, 
+        horizon_days: horizon 
+      })
+    });
+    
+    loading.classList.add('hidden');
+    gridDiv.style.display = 'grid';
+    
+    gridDiv.innerHTML = `
+      <div class="stat-item"><div class="label">Crecimiento Mediano</div><div class="value ${result.median_growth >= 0 ? '' : 'edge-baja'}">${result.median_growth >= 0 ? '+' : ''}${result.median_growth.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Crecimiento Promedio</div><div class="value ${result.mean_growth >= 0 ? '' : 'edge-baja'}">${result.mean_growth >= 0 ? '+' : ''}${result.mean_growth.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">% Rentables</div><div class="value">${result.pct_profitable.toFixed(1)}%</div></div>
+      <div class="stat-item"><div class="label">Max DD Mediano</div><div class="value edge-baja">${result.max_drawdown_median.toFixed(1)}%</div></div>
+      <div class="stat-item"><div class="label">Max DD P95</div><div class="value edge-baja">${result.max_drawdown_p95.toFixed(1)}%</div></div>
+      <div class="stat-item"><div class="label">Risk of Ruin</div><div class="value ${result.risk_of_ruin <= 1 ? '' : result.risk_of_ruin <= 5 ? 'value' : 'edge-baja'}">${result.risk_of_ruin.toFixed(1)}%</div></div>
+      <div class="stat-item"><div class="label">VaR 95%</div><div class="value edge-baja">${result.var_95.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">Expected Shortfall</div><div class="value edge-baja">${result.expected_shortfall.toFixed(2)}%</div></div>
+      <div class="stat-item"><div class="label">P10</div><div class="value">${result.final_bankroll_p10.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">P50 (Mediana)</div><div class="value">${result.final_bankroll_p50.toFixed(2)}€</div></div>
+      <div class="stat-item"><div class="label">P90</div><div class="value">${result.final_bankroll_p90.toFixed(2)}€</div></div>
+    `;
+    
+  } catch (e) {
+    loading.classList.add('hidden');
+    alert('Error: ' + e.message);
+  }
+}
+
+async function ejecutarFactorAnalysis() {
+  if (!analyticsPortfolioId) return;
+  
+  const loading = $('#an-factor-loading');
+  const resultDiv = $('#an-factor-result');
+  const body = $('#an-factor-body');
+  
+  loading.classList.remove('hidden');
+  resultDiv.classList.add('hidden');
+  body.innerHTML = '';
+  
+  try {
+    const method = $('#an-factor-method').value;
+    const periodDays = parseInt($('#an-factor-period').value) || 90;
+    
+    const result = await fetchJson('/api/analytics/factor-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        portfolio_id: analyticsPortfolioId, 
+        period_days: periodDays, 
+        method 
+      })
+    });
+    
+    loading.classList.add('hidden');
+    resultDiv.classList.remove('hidden');
+    
+    if (result.error) {
+      resultDiv.classList.add('notice');
+      resultDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${result.error}`;
+      return;
+    }
+    
+    resultDiv.innerHTML = `<strong>✅ Factor Analysis (${method}) completado</strong><br>R²: <strong>${(result.r_squared * 100).toFixed(1)}%</strong> | Features: ${result.n_features || result.n_components}`;
+    
+    const factors = result.factors || {};
+    body.innerHTML = Object.entries(factors).map(([name, f]) => {
+      const sigClass = f.significant ? 'status-won' : 'status-void';
+      const sigText = f.significant ? '✅ Sí' : '❌ No';
+      return `
+        <tr>
+          <td><strong>${name}</strong></td>
+          <td>${f.exposure?.toFixed(4) || f.coefficient?.toFixed(4) || '—'}</td>
+          <td>${f.contribution_pct?.toFixed(1) || '—'}%</td>
+          <td>${f.t_stat?.toFixed(2) || '—'}</td>
+          <td>${f.p_value?.toFixed(4) || '—'}</td>
+          <td><span class="${sigClass}">${sigText}</span></td>
+        </tr>
+      `;
+    }).join('');
+    
+  } catch (e) {
+    loading.classList.add('hidden');
+    resultDiv.classList.remove('hidden');
+    resultDiv.classList.add('notice');
+    resultDiv.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${e.message}`;
+  }
+}
+
+async function generarReporteCompleto() {
+  if (!analyticsPortfolioId) return;
+  
+  const btn = event.target;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generando...';
+  
+  try {
+    const periodDays = parseInt($('#an-period-select').value) || 30;
+    
+    const result = await fetchJson('/api/analytics/full-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ portfolio_id: analyticsPortfolioId, period_days: periodDays })
+    });
+    
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-file-alt"></i> Generar Reporte Completo';
+    
+    // Mostrar resumen en modal/alert
+    const summary = result.summary;
+    let html = '<div style="max-height:400px;overflow:auto;">';
+    html += `<h4>Resumen Ejecutivo</h4>`;
+    html += `<div class="stats-grid">`;
+    for (const [k, v] of Object.entries(summary.key_metrics)) {
+      const cls = (k.includes('ruin') || k.includes('survival') && v < 0.9) ? 'edge-baja' : '';
+      html += `<div class="stat-item"><div class="label">${k}</div><div class="value ${cls}">${typeof v === 'number' ? v.toFixed(2) : v}</div></div>`;
+    }
+    html += `</div>`;
+    
+    html += `<h4 style="margin-top:16px;">Top Contribuyentes</h4>`;
+    for (const c of summary.top_contributors) {
+      html += `<div class="notice">${c.factor}: ROI ${c.roi.toFixed(2)}% | Contrib: ${c.contrib.toFixed(1)}%</div>`;
+    }
+    
+    if (summary.risk_alerts.length) {
+      html += `<h4 style="margin-top:16px;">⚠️ Alertas de Riesgo</h4>`;
+      for (const alert of summary.risk_alerts) {
+        html += `<div class="notice" style="border-color:var(--danger);color:var(--danger)">${alert}</div>`;
+      }
+    }
+    html += '</div>';
+    
+    $('#an-report-content').innerHTML = html;
+    $('#an-report-card').style.display = 'block';
+    
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-file-alt"></i> Generar Reporte Completo';
+    alert('Error: ' + e.message);
+  }
+}
+
+// Agregar al init
+document.addEventListener('DOMContentLoaded', () => {
+  // ... existing init code ...
+  $('#nav-analytics').addEventListener('click', goAnalytics);
+});

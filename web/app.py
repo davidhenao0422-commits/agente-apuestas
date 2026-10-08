@@ -2289,3 +2289,154 @@ def list_features(feature_group: str = None):
     
     features = pipeline.registry.db.get_features(feature_group)
     return {"features": features, "count": len(features)}
+
+
+# ===================== ADVANCED ANALYTICS ENDPOINTS =====================
+
+@app.get("/api/analytics/attribution/{portfolio_id}")
+def get_performance_attribution(portfolio_id: int, period_days: int = 30):
+    """Atribución de rendimiento (Brinson): descompone ROI por modelo, liga, mercado, timing."""
+    from analyzers.analytics import create_analytics_engine
+    engine = create_analytics_engine(_get_db())
+    
+    result = engine.run_performance_attribution(portfolio_id, period_days)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "period_days": period_days,
+        "total_roi": result.total_roi,
+        "total_pnl": result.total_pnl,
+        "by_model": result.by_model,
+        "by_league": result.by_league,
+        "by_market": result.by_market,
+        "by_timing": result.by_timing,
+        "by_luck": result.by_luck,
+        "selection_effect": result.selection_effect,
+        "allocation_effect": result.allocation_effect,
+        "interaction_effect": result.interaction_effect,
+    }
+
+
+@app.get("/api/analytics/regime")
+def get_market_regime(portfolio_id: int = None, lookback_days: int = 60):
+    """Detecta régimen actual del mercado (bull, bear, volatile, calm, trending, mean_reverting)."""
+    from analyzers.analytics import create_analytics_engine
+    engine = create_analytics_engine(_get_db())
+    
+    regime = engine.detect_market_regime(portfolio_id, lookback_days)
+    
+    return {
+        "regime_type": regime.regime_type,
+        "start_date": regime.start_date,
+        "end_date": regime.end_date,
+        "metrics": regime.metrics,
+        "confidence": regime.confidence,
+        "description": regime.description,
+    }
+
+
+@app.get("/api/analytics/regime/history")
+def get_regime_history(regime_type: str = None, limit: int = 50):
+    """Historial de regímenes detectados."""
+    db = _get_db()
+    regimes = db.get_regime_history(regime_type, limit)
+    return {"regimes": regimes, "count": len(regimes)}
+
+
+@app.get("/api/analytics/regime/current")
+def get_current_regime():
+    """Régimen actualmente activo."""
+    db = _get_db()
+    regime = db.get_current_regime()
+    if regime:
+        regime["metrics"] = json.loads(regime["metrics"])
+    return {"regime": regime}
+
+
+@app.post("/api/analytics/stress-test")
+def run_stress_test(portfolio_id: int, scenario: str = "market_crash", runs: int = 2000):
+    """Ejecuta stress test Monte Carlo para un escenario."""
+    from analyzers.analytics import create_analytics_engine
+    engine = create_analytics_engine(_get_db())
+    
+    result = engine.run_stress_test(portfolio_id, scenario, runs)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "scenario": scenario,
+        "runs": runs,
+        "max_drawdown": result.max_drawdown,
+        "var_95": result.var_95,
+        "expected_shortfall": result.expected_shortfall,
+        "survival_probability": result.survival_probability,
+        "median_final_bankroll": result.median_final_bankroll,
+        "worst_case_bankroll": result.worst_case_bankroll,
+        "recovery_time_days": result.recovery_time_days,
+    }
+
+
+@app.get("/api/analytics/stress-tests")
+def list_stress_tests(portfolio_id: int = None, limit: int = 50):
+    """Lista stress tests guardados."""
+    db = _get_db()
+    tests = db.get_stress_tests(portfolio_id, limit)
+    return {"tests": tests, "count": len(tests)}
+
+
+@app.post("/api/analytics/monte-carlo")
+def run_monte_carlo(portfolio_id: int, num_sims: int = 2000, horizon_days: int = 90):
+    """Simulación Monte Carlo del portfolio."""
+    from analyzers.analytics import create_analytics_engine
+    engine = create_analytics_engine(_get_db())
+    
+    result = engine.run_monte_carlo_portfolio(portfolio_id, num_sims, horizon_days)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "num_sims": num_sims,
+        "horizon_days": horizon_days,
+        **result,
+    }
+
+
+@app.post("/api/analytics/factor-analysis")
+def run_factor_analysis(portfolio_id: int, period_days: int = 90, method: str = "ridge"):
+    """Análisis de factores (PCA o Ridge Regression) para drivers de rendimiento."""
+    from analyzers.analytics import create_analytics_engine
+    engine = create_analytics_engine(_get_db())
+    
+    result = engine.run_factor_analysis(portfolio_id, period_days, method)
+    
+    return {
+        "portfolio_id": portfolio_id,
+        "period_days": period_days,
+        "method": method,
+        **result,
+    }
+
+
+@app.get("/api/analytics/factor-analysis")
+def list_factor_analysis(portfolio_id: int = None, limit: int = 10):
+    """Lista análisis de factores guardados."""
+    db = _get_db()
+    analyses = db.get_factor_analysis(portfolio_id, limit)
+    return {"analyses": analyses, "count": len(analyses)}
+
+
+@app.post("/api/analytics/full-report")
+def generate_full_report(portfolio_id: int, period_days: int = 30):
+    """Genera reporte completo de analytics (attribution + regime + stress + MC + factors)."""
+    from analyzers.analytics import create_analytics_engine
+    engine = create_analytics_engine(_get_db())
+    
+    result = engine.generate_full_report(portfolio_id, period_days)
+    
+    return result
+
+
+@app.get("/api/analytics/reports")
+def list_analytics_reports(report_type: str = None, portfolio_id: int = None, limit: int = 50):
+    """Lista reportes de analytics generados."""
+    db = _get_db()
+    reports = db.get_analytics_reports(report_type, portfolio_id, limit)
+    return {"reports": reports, "count": len(reports)}

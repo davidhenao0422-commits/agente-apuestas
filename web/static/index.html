@@ -22,6 +22,7 @@
         <button class="nav-btn" id="nav-paper"><i class="fas fa-chart-area"></i> Paper Trading</button>
         <button class="nav-btn" id="nav-risk"><i class="fas fa-shield-alt"></i> Risk Mgmt</button>
         <button class="nav-btn" id="nav-ml"><i class="fas fa-brain"></i> ML Models</button>
+        <button class="nav-btn" id="nav-analytics"><i class="fas fa-chart-pie"></i> Analytics</button>
       </nav>
     </div>
   </header>
@@ -673,6 +674,193 @@
         </div>
         <div id="ml-opt-loading" class="empty hidden"><i class="fas fa-spinner fa-spin"></i> Optimizando...</div>
         <div id="ml-opt-result" class="notice hidden"></div>
+      </div>
+    </section>
+ 
+    <!-- Vista Analytics -->
+    <section id="view-analytics" class="view hidden">
+      <div class="page-head">
+        <button class="back-btn" onclick="goHome()"><i class="fas fa-arrow-left"></i> Inicio</button>
+        <h2><i class="fas fa-chart-pie"></i> Advanced Analytics</h2>
+      </div>
+      
+      <!-- Portfolio Selector -->
+      <div class="card bankroll-card" id="an-portfolio-card">
+        <h3 class="card-title"><i class="fas fa-briefcase"></i> Portfolio</h3>
+        <div id="an-portfolio-info" class="stats-grid"></div>
+        <div class="bankroll-controls" style="margin-top: 16px;">
+          <div class="control-group">
+            <label><i class="fas fa-calendar"></i> Período (días)</label>
+            <select id="an-period-select" onchange="cargarAnalyticsDashboard()">
+              <option value="7">7 días</option>
+              <option value="30" selected>30 días</option>
+              <option value="90">90 días</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="generarReporteCompleto()">
+            <i class="fas fa-file-alt"></i> Generar Reporte Completo
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="cargarAnalyticsDashboard()">
+            <i class="fas fa-sync"></i> Actualizar
+          </button>
+        </div>
+      </div>
+ 
+      <!-- Key Metrics -->
+      <div class="card" id="an-kpi-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-tachometer-alt"></i> KPIs Principales</h3>
+        <div id="an-kpi-grid" class="stats-grid"></div>
+      </div>
+ 
+      <!-- Performance Attribution -->
+      <div class="card" id="an-attr-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-layer-group"></i> Atribución de Rendimiento (Brinson)</h3>
+        <div class="bankroll-controls" style="margin-bottom: 16px;">
+          <div class="control-group">
+            <label>Dimensión</label>
+            <select id="an-attr-dim" onchange="renderAttribution()">
+              <option value="by_model">Por Modelo</option>
+              <option value="by_league">Por Liga</option>
+              <option value="by_market">Por Mercado</option>
+              <option value="by_timing">Por Timing</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table id="an-attr-table">
+            <thead>
+              <tr>
+                <th>Factor</th>
+                <th>Picks</th>
+                <th>Staked</th>
+                <th>P&L</th>
+                <th>ROI</th>
+                <th>Win Rate</th>
+                <th>Contribución</th>
+              </tr>
+            </thead>
+            <tbody id="an-attr-body"></tbody>
+          </table>
+        </div>
+        <div id="an-brinson" class="stats-grid" style="margin-top: 16px;"></div>
+      </div>
+ 
+      <!-- Market Regime -->
+      <div class="card" id="an-regime-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-wave-square"></i> Régimen de Mercado</h3>
+        <div id="an-regime-info" class="stats-grid"></div>
+        <div class="table-responsive">
+          <table id="an-regime-history">
+            <thead>
+              <tr>
+                <th>Tipo</th>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Confianza</th>
+                <th>Volatilidad</th>
+                <th>Sharpe</th>
+                <th>Trend</th>
+                <th>Win Rate</th>
+              </tr>
+            </thead>
+            <tbody id="an-regime-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- Stress Tests -->
+      <div class="card" id="an-stress-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-bolt"></i> Stress Testing</h3>
+        <div class="bankroll-controls" style="margin-bottom: 16px;">
+          <div class="control-group">
+            <label>Escenario</label>
+            <select id="an-stress-scenario">
+              <option value="normal">Normal</option>
+              <option value="market_crash" selected>Market Crash</option>
+              <option value="high_volatility">Alta Volatilidad</option>
+              <option value="correlated_losses">Pérdidas Correlacionadas</option>
+              <option value="liquidity_crisis">Crisis de Liquidez</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label>Runs</label>
+            <input type="number" id="an-stress-runs" value="1000" min="100" max="10000" step="100" />
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="ejecutarStressTest()">
+            <i class="fas fa-play"></i> Ejecutar
+          </button>
+        </div>
+        <div id="an-stress-loading" class="empty hidden"><i class="fas fa-spinner fa-spin"></i> Simulando...</div>
+        <div id="an-stress-result" class="notice hidden"></div>
+        <div id="an-stress-grid" class="stats-grid" style="display: none; margin-top: 16px;"></div>
+      </div>
+ 
+      <!-- Monte Carlo -->
+      <div class="card" id="an-mc-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-dice"></i> Monte Carlo Portfolio</h3>
+        <div class="bankroll-controls" style="margin-bottom: 16px;">
+          <div class="control-group">
+            <label>Simulaciones</label>
+            <input type="number" id="an-mc-sims" value="1000" min="200" max="5000" step="100" />
+          </div>
+          <div class="control-group">
+            <label>Horizonte (días)</label>
+            <input type="number" id="an-mc-horizon" value="90" min="30" max="365" step="30" />
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="ejecutarMonteCarlo()">
+            <i class="fas fa-play"></i> Simular
+          </button>
+        </div>
+        <div id="an-mc-loading" class="empty hidden"><i class="fas fa-spinner fa-spin"></i> Simulando...</div>
+        <div id="an-mc-grid" class="stats-grid" style="display: none;"></div>
+      </div>
+ 
+      <!-- Factor Analysis -->
+      <div class="card" id="an-factor-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-project-diagram"></i> Factor Analysis</h3>
+        <div class="bankroll-controls" style="margin-bottom: 16px;">
+          <div class="control-group">
+            <label>Método</label>
+            <select id="an-factor-method">
+              <option value="ridge">Ridge Regression</option>
+              <option value="pca">PCA</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label>Período</label>
+            <select id="an-factor-period">
+              <option value="30">30 días</option>
+              <option value="90" selected>90 días</option>
+              <option value="180">180 días</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="ejecutarFactorAnalysis()">
+            <i class="fas fa-search"></i> Analizar
+          </button>
+        </div>
+        <div id="an-factor-loading" class="empty hidden"><i class="fas fa-spinner fa-spin"></i> Analizando...</div>
+        <div id="an-factor-result" class="notice hidden"></div>
+        <div class="table-responsive">
+          <table id="an-factor-table">
+            <thead>
+              <tr>
+                <th>Factor</th>
+                <th>Exposición</th>
+                <th>Contribución %</th>
+                <th>t-stat</th>
+                <th>p-value</th>
+                <th>Significativo</th>
+              </tr>
+            </thead>
+            <tbody id="an-factor-body"></tbody>
+          </table>
+        </div>
+      </div>
+ 
+      <!-- Full Report -->
+      <div class="card" id="an-report-card" style="display: none;">
+        <h3 class="card-title"><i class="fas fa-file-alt"></i> Reporte Completo</h3>
+        <div id="an-report-content"></div>
       </div>
     </section>
  
