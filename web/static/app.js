@@ -558,6 +558,9 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#nav-mejores').addEventListener('click', goMejores);
   $('#nav-bookmakers').addEventListener('click', goBookmakers);
   $('#nav-paper').addEventListener('click', goPaper);
+  $('#nav-risk').addEventListener('click', goRisk);
+  $('#nav-ml').addEventListener('click', goML);
+  $('#nav-analytics').addEventListener('click', goAnalytics);
   
   // Cargar ligas para el selector de bookmakers
   cargarLigasBookmakers();
@@ -2008,9 +2011,3 @@ async function generarReporteCompleto() {
     alert('Error: ' + e.message);
   }
 }
-
-// Agregar al init
-document.addEventListener('DOMContentLoaded', () => {
-  // ... existing init code ...
-  $('#nav-analytics').addEventListener('click', goAnalytics);
-});
