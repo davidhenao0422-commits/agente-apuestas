@@ -11,3 +11,5 @@ lxml==5.2.2
 fastapi==0.141.1
 uvicorn[standard]==0.34.2
 schedule==1.2.2
+scikit-learn==1.5.1
+optuna==4.0.0
