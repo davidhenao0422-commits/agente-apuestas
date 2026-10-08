@@ -1288,7 +1288,9 @@ python test_channel.py
 - ✅ Ensemble predictor integrado (7 modelos)
 - ✅ Bookmaker ranking + steam detection integrados en scheduler
 - ✅ Paper trading + risk management + ML pipeline + analytics operativos via API web
+- ✅ Frontend nav handlers añadidos (Risk, ML, Analytics views funcionales)
+- ✅ `/api/mejores-apuestas` modo real optimizado: `fast=true` default, ligas prioritarias, bug odds API corregido
 
 ---
 
-*Documento generado el 2026-09-04. Última actualización: 2026-10-08 - Phase 7 Advanced Analytics (attribution, regime detection, stress testing, Monte Carlo, factor analysis, scheduler jobs).*
+*Documento generado el 2026-09-04. Última actualización: 2026-10-08 - Phase 7 Advanced Analytics + fixes API/Frontend (mejores-apuestas fast mode, nav handlers).*
