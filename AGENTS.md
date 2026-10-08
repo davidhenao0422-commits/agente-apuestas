@@ -12,6 +12,12 @@ Aplicación web y bot de Telegram que genera **recomendaciones de apuestas basad
 - 🌐 Aplicación web responsive con dashboard de transparencia, Monte Carlo, CLV tracking
 - 🤖 Bot de Telegram + Scheduler automático (canal diario 8:00 AM)
 - ☁️ Desplegada en Render Free (24/7, gratis para siempre)
+- 📈 **Paper Trading Simulator** — Portfolios, picks, Kelly, P&L, auto-settle, métricas completas
+- ⚠️ **Advanced Risk Management** — Límites exposición, correlaciones, stop-loss, Kelly optimization, alertas Telegram
+- 🏆 **Bookmaker Sharp Ranking** — CLV, accuracy, consistency, volume, sharp factor ranking
+- 🚀 **Steam Move Detection** — Odds snapshots, detector, alertas tiempo real en bookmakers sharp
+- 🤖 **ML Pipeline** — Model Registry, Feature Engineering, Optuna Hyperopt, A/B Testing, Auto-Retrain
+- 📊 **Advanced Analytics** — Performance Attribution, Regime Detection, Stress Testing, Factor Analysis
 
 ---
 
@@ -21,9 +27,9 @@ Aplicación web y bot de Telegram que genera **recomendaciones de apuestas basad
 - **Hosting:** Render Free ($0 para siempre)
 - **GitHub:** https://github.com/davidhenao0422-commits/agente-apuestas
 - **API Key:** `${API_FOOTBALL_KEY}` (ver `.env`)
-- **Fecha:** 2026-10-06
+- **Fecha:** 2026-10-08
 - **Estado:** ✅ En línea (deploy automático desde main)
-- **Último commit:** 89a03cf - feat: ensemble predictor + transparency + monte carlo + odds aggregator
+- **Último commit:** 6aae7d3 - feat: Phase 7 - Advanced Analytics Dashboard (attribution, regime detection, stress testing, Monte Carlo, factor analysis, scheduler jobs)
 
 ---
 
@@ -61,11 +67,15 @@ Aplicación web y bot de Telegram que genera **recomendaciones de apuestas basad
 │              │  │ xG Model         │  │  - Calibration Recs   │
 │              │  │ Ensemble         │  │  - CLV Records        │
 │              │  │ Injury Model     │  │  - Bookmaker Scores   │
-│              │  │ Value betting    │  │                       │
+│              │  │ Value betting    │  │  - Odds Snapshots     │
+│              │  │ Steam Moves      │  │  - Paper Trading      │
+│              │  │ Bookmaker Rank   │  │  - Risk Management    │
+│              │  │ Risk Manager     │  │  - ML Pipeline        │
+│              │  │ Analytics        │  │  - Analytics          │
 └──────────────┘  └──────────────────┘  └───────────────────────┘
 ```
 
-### Flujo de Datos
+### Flujo de Datos (Core)
 
 ```
 1. USUARIO envía: "Real Madrid - La Liga, Barcelona - La Liga"
@@ -86,6 +96,61 @@ Aplicación web y bot de Telegram que genera **recomendaciones de apuestas basad
         │
         ▼
 5. BOT envía respuesta al USUARIO
+```
+
+### Pipeline Automático (Scheduler 8:00 AM)
+
+```
+┌─────────────────┐
+│  DAILY JOB      │  (08:00 AM)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌──────────────────┐
+│ FETCH FIXTURES  │────▶│ ANALYZE EACH     │
+│ (priority leagues)  │   │ MATCH (Ensemble) │
+└─────────────────┘     └────────┬─────────┘
+                                 │
+                    ┌────────────┼────────────┐
+                    ▼            ▼            ▼
+            ┌────────────┐ ┌───────────┐ ┌─────────────┐
+            │ STORE      │ │ STEAM MOVE│ │ BOOKMAKER   │
+            │ PREDICTIONS│ │ DETECTION │ │ RANK UPDATE │
+            └────────────┘ └───────────┘ └─────────────┘
+                    │            │            │
+                    ▼            ▼            ▼
+            ┌─────────────────────────────────────┐
+            │       TELEGRAM CHANNEL ALERT        │
+            └─────────────────────────────────────┘
+```
+
+### Flujo Paper Trading + Risk + ML
+
+```
+USER / WEB UI
+     │
+     ▼
+┌──────────────────┐     ┌──────────────────┐
+│ PAPER TRADING    │────▶│ RISK MANAGER     │
+│ ENGINE           │     │ (exposure, corr, │
+│ - portfolios     │     │  stop-loss,      │
+│ - picks/Kelly    │     │  Kelly opt)      │
+│ - auto-settle    │     └────────┬─────────┘
+└────────┬─────────┘              │
+         │                        ▼
+         │               ┌──────────────────┐
+         │               │ TELEGRAM ALERTS  │
+         │               └──────────────────┘
+         │
+         ▼
+┌──────────────────┐     ┌──────────────────┐
+│ ANALYTICS ENGINE │────▶│ ML PIPELINE      │
+│ - Attribution    │     │ - Feature Eng    │
+│ - Regime Detect  │     │ - Model Registry │
+│ - Stress Test    │     │ - Optuna Hyperopt│
+│ - Monte Carlo    │     │ - A/B Testing    │
+│ - Factor Analysis│     │ - Auto-Retrain   │
+└──────────────────┘     └──────────────────┘
 ```
 
 ---
@@ -129,7 +194,8 @@ AGENTE DE APUESTAS DEPORTIVAS/
 │   ├── football_data.py     # Cliente football-data.org (secundario)
 │   ├── cache.py             # Sistema de cache SQLite
 │   ├── scraper.py           # Web scraping (fallback)
-│   └── odds_aggregator.py   # Agregador odds multi-fuente
+│   ├── odds_aggregator.py   # Agregador odds multi-fuente
+│   └── odds_api.py          # Cliente The Odds API
 │
 ├── analyzers/               # Motor de análisis estadístico
 │   ├── stats.py             # Estadísticas básicas
@@ -144,7 +210,13 @@ AGENTE DE APUESTAS DEPORTIVAS/
 │   ├── elo.py               # Ratings ELO
 │   ├── pi_ratings.py        # PI Ratings
 │   ├── xg_model.py          # Expected Goals model
-│   └── injury_model.py      # Modelo de lesiones
+│   ├── injury_model.py      # Modelo de lesiones
+│   ├── steam_moves.py       # Steam Move Detection
+│   ├── bookmaker_ranking.py # Bookmaker Sharp Ranking
+│   ├── paper_trading.py     # Paper Trading Engine
+│   ├── risk_management.py   # Advanced Risk Management
+│   ├── ml_pipeline.py       # ML Pipeline (Model Registry, Optuna, A/B)
+│   └── analytics.py         # Advanced Analytics (Attribution, Regime, Stress, Factor)
 │
 ├── predictors/              # Motor de predicción
 │   ├── engine.py            # Motor principal de predicción
@@ -153,7 +225,7 @@ AGENTE DE APUESTAS DEPORTIVAS/
 │   └── staking.py           # Kelly, Half-Kelly, Monte Carlo
 │
 ├── storage/                 # Persistencia
-│   ├── database.py          # Conexión SQLite
+│   ├── database.py          # Conexión SQLite + esquema completo
 │   ├── models.py            # Modelos de datos
 │   └── migrations.py        # Migraciones
 │
@@ -173,7 +245,7 @@ AGENTE DE APUESTAS DEPORTIVAS/
 │   └── test_ensemble.py
 │
 └── scripts/                 # Scripts utilitarios
-    ├── scheduler.py         # Scheduler automático (canal 8:00 AM)
+    ├── scheduler.py         # Scheduler automático (canal 8:00 AM + steam + bookmakers)
     ├── test_channel.py      # Test conexión bot-canal
     └── debug_ensemble.py    # Debug ensemble predictor
 ```
@@ -263,6 +335,233 @@ Monte Carlo: 2000 paths × 500 bets para risk-of-ruin
 
 ---
 
+## Bookmaker Sharp Ranking
+
+Evalúa la calidad e integridad de bookmakers para identificar los "sharp" (líderes de mercado).
+
+### Métricas
+| Métrica | Peso | Descripción |
+|---------|------|-------------|
+| **CLV Score** | 40% | % mercados que baten línea de cierre + CLV promedio |
+| **Accuracy** | 25% | Brier score inverso, log-loss vs resultado real |
+| **Consistency** | 20% | Inverso de volatilidad de odds (estabilidad líneas) |
+| **Volume** | 15% | Liquidez / número de mercados ofrecidos |
+
+### Output
+- **Sharp Factor** (0-100): Score combinado ponderado
+- **Ranking global** por liga y período
+- **Dashboard** en `/api/bookmakers/ranking` y `/api/transparency/bookmakers`
+
+### Bookmakers Sharp de Referencia
+Pinnacle, Betfair, Bet365, Circa, Bookmaker.eu, TheGreek, 5Dimes, SBO, Maxbet
+
+### Almacenamiento
+Tabla `bookmaker_scores` + `odds_snapshots` (con flag `is_sharp`)
+
+---
+
+## Steam Move Detection
+
+Detecta movimientos bruscos de líneas en bookmakers sharp causados por apuestas grandes de sharps/sindicados.
+
+### Umbrales por Defecto
+| Mercado | Umbral % |
+|---------|----------|
+| 1X2 (H2H) | 3% |
+| Totals (O/U) | 2.5% |
+| BTTS | 3% |
+| Spreads/Handicap | 2% |
+
+### Ventana de Detección
+- **15 minutos** entre snapshots
+- Mínimo 2 snapshots para comparación
+- Severidad: low / medium / high / extreme
+
+### Output
+- `SteamMove` dataclass con: match, bookmaker, market, direction, old/new odds, % change, severity, timestamp
+- Alertas Telegram en tiempo real
+- Endpoints: `/api/steam-moves`, `/api/steam-moves/summary`, `/api/steam-moves/poll`
+
+### Integración Scheduler
+- Polling automático cada 5 min durante horas pre-partido
+- Almacena snapshots en `odds_snapshots`
+- Actualiza `bookmaker_scores` periódicamente
+
+---
+
+## Paper Trading Simulator
+
+Simulador completo de apuestas sin dinero real para validar estrategias.
+
+### Características
+- **Portfolios** múltiples con bankroll, Kelly fraction, max bet %, currency
+- **Picks** manuales o desde recomendaciones (auto/source scheduler)
+- **Mercados**: 1X2, Over/Under, BTTS, Clean Sheet, Double Chance, Asian Handicap
+- **Staking**: Kelly fraccionado configurable por portfolio
+- **Auto-settlement**: Post-partido usando resultados reales
+- **Métricas**: ROI, Win Rate, Sharpe, Max Drawdown, P&L por mercado/liga
+
+### Flujo
+```
+1. CREATE PORTFOLIO → 2. PLACE PICK (manual/auto) → 3. MONITOR (pending)
+                                              ↓
+4. AUTO-SETTLE (post-match) ← 5. FETCH RESULT ← 6. CALCULATE P&L
+```
+
+### Endpoints Principales
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/paper/portfolios` | Listar portfolios |
+| POST | `/api/paper/portfolios` | Crear portfolio |
+| GET | `/api/paper/portfolios/{id}/performance` | Métricas completas |
+| POST | `/api/paper/portfolios/{id}/picks` | Colocar pick manual |
+| POST | `/api/paper/portfolios/{id}/picks/from-recommendation` | Pick desde recomendación |
+| POST | `/api/paper/portfolios/{id}/auto-settle` | Auto-settle picks pendientes |
+
+### Almacenamiento
+Tablas: `paper_portfolio`, `paper_picks`, `paper_settlements`
+
+---
+
+## Advanced Risk Management
+
+Gestión de riesgo profesional para portfolios de paper trading.
+
+### Límites Configurables
+| Límite | Default | Descripción |
+|--------|---------|-------------|
+| Max Exposure Total | 30% bankroll | Picks simultáneos máx |
+| Max Exposure Liga | 15% | Por liga individual |
+| Max Exposure Mercado | 20% | Por tipo mercado |
+| Max Exposure Equipo | 10% | Por equipo individual |
+| Max Correlación | 0.70 | Entre picks activos |
+| Max Drawdown | 20% | Desde peak bankroll |
+| Stop Loss | 10% | Desde peak, alerta/trigger |
+| Max Concurrent Picks | 20 | Picks pendientes simultáneos |
+| Kelly Fraction Range | 0.10 - 0.50 | Límites fracción Kelly |
+
+### Análisis de Correlación
+- **Shared Team**: Mismo equipo en picks distintos
+- **Shared League**: Misma liga
+- **Shared Market**: Mismo tipo mercado
+- Score de correlación compuesto (0-1)
+
+### Alertas (con Telegram)
+| Tipo | Severidad | Trigger |
+|------|-----------|---------|
+| `exposure_breach` | critical | Límite exposición superado |
+| `correlation_high` | warning | Correlación > 0.70 |
+| `drawdown_warning` | warning | Drawdown > 15% |
+| `stop_loss_triggered` | critical | Drawdown > 20% |
+
+### Portfolio Optimization
+- **Kelly fraccionado con constraints** (optimización convexa)
+- Respeta todos los límites de exposición y correlación
+- Endpoint: `/api/risk/portfolio/{id}/optimize-kelly`
+
+### Endpoints
+`/api/risk/portfolio/{id}/dashboard`, `/metrics`, `/limits`, `/correlations`, `/alerts`, `/check`
+
+### Almacenamiento
+Tablas: `risk_limits`, `risk_alerts`, `portfolio_correlations`
+
+---
+
+## ML Pipeline
+
+Pipeline completo de ML para reentrenamiento automático, model registry y A/B testing.
+
+### Componentes
+
+#### 1. Feature Engineering (`FeatureEngineer`)
+- Features: forma reciente (5/10/20 partidos), H2H, stats temporada, ELO, PI, xG, lesiones, mercado odds
+- Target: resultado (home/draw/away), goles totales, BTTS
+- Dataset construidos desde `matches`, `team_stats`, `odds_snapshots`
+
+#### 2. Model Registry (`ModelRegistry`)
+- **Versionado semántico** (major.minor.patch)
+- **Champion/Challenger**: Un modelo campeón por tipo
+- **Lineage**: Trackea parent_version, training_config, métricas
+- **Artifacts**: Pickle + metadatos JSON en `models/{model_name}/v{version}/`
+
+#### 3. Hyperparameter Tuning (Optuna)
+- Optimiza pesos del ensemble (7 modelos)
+- Objetivo: minimizar Brier score / maximizar ROI
+- Trials configurables (default 50, timeout 1h)
+- Pruning automático de trials malos
+
+#### 4. A/B Testing Framework
+- Experimentos: champion vs challenger
+- Asignación aleatoria tráfico (configurable %)
+- Análisis estadístico: t-test, confidence intervals, minimum detectable effect
+- Decisión automática promote/archive basada en significancia
+
+#### 5. Automated Retraining
+- Job semanal programado (scheduler)
+- Lookback window configurable (default 365 días)
+- Minimum matches threshold (default 500)
+- Validation split temporal (default 20%)
+- Deploy automático si métricas superan thresholds
+
+### Modelos Soportados
+Poisson, Dixon-Coles, Bivariate Poisson, Skellam, ELO, PI Ratings, xG, Ensemble
+
+### Endpoints
+`/api/ml/models`, `/models/{name}/champion`, `/models/{name}/lineage`, `/models/compare`, `/models/{name}/promote`, `/models/{name}/archive`, `/training-runs`, `/retrain`, `/retrain-all`, `/optimize-ensemble`, `/ab-experiments`, `/features`
+
+### Almacenamiento
+Tablas: `model_versions`, `training_runs`, `ab_experiments`, `feature_importance`
+
+---
+
+## Advanced Analytics
+
+Analytics de nivel institucional para paper trading y model evaluation.
+
+### 1. Performance Attribution
+Descompone ROI en factores contribuyentes (estilo Brinson):
+- **Selection Effect**: Skill picking winners
+- **Allocation Effect**: Sizing correcto (Kelly)
+- **Interaction Effect**: Selección × Asignación
+- **By Model/Liga/Mercado/Timing/Luck**: Desglose granular
+
+### 2. Regime Detection
+Detecta regímenes de mercado usando HMM / changepoint detection:
+- **Tipos**: bull, bear, volatile, calm, trending, mean_reverting
+- Métricas: volatilidad realizada, correlación media, skew, kurtosis, win rate
+- Confidence score por régimen
+- Endpoints: `/api/analytics/regime`, `/current`, `/history`
+
+### 3. Stress Testing
+Escenarios extremos para validar robustez:
+- **Crash**: -30% bankroll shock
+- **High Volatility**: 2x volatilidad histórica
+- **Correlation Breakdown**: Correlaciones → 1.0
+- **Model Decay**: Brier score +50%
+- **Liquidity Crisis**: Spreads +200bps
+- Output: Max DD, VaR 95%, Expected Shortfall, Survival Probability, Recovery Time
+
+### 4. Monte Carlo Portfolio
+- 2000 paths × 500 bets (configurable)
+- Samplea de distribución empírica de picks históricos
+- Risk-of-ruin, percentiles bankroll final, drawdown distribution
+- Endpoint: `/api/analytics/monte-carlo`
+
+### 5. Factor Analysis (PCA + Regresión)
+- PCA sobre features de picks para identificar drivers
+- Regresión lineal: ROI ~ factores principales
+- Identifica: momentum, value, quality, size, league factors
+- Endpoint: `/api/analytics/factor-analysis`
+
+### 6. Full Report
+Reporte consolidado con todas las métricas + visualizaciones data-ready
+Endpoint: `/api/analytics/full-report`
+
+### Almacenamiento
+Tablas: `analytics_reports`, `regime_history`, `stress_test_results`
+
+---
+
 ## Endpoints API (App Web)
 
 | Método | Ruta | Descripción |
@@ -284,6 +583,63 @@ Monte Carlo: 2000 paths × 500 bets para risk-of-ruin
 | GET | `/api/monte-carlo/{liga}/{local}/{visitante}` | Simulación Monte Carlo bankroll |
 | POST | `/api/refresh-odds` | Refrescar odds multi-fuente |
 | GET | `/api/odds/{liga}/{local}/{visitante}` | Mejores odds para un partido |
+| GET | `/api/steam-moves` | Steam moves detectados |
+| GET | `/api/steam-moves/summary` | Resumen steam moves por severidad |
+| GET | `/api/steam-moves/{match_id}/history` | Historial odds para un partido |
+| POST | `/api/steam-moves/poll` | Polling manual de odds |
+| GET | `/api/bookmakers/ranking` | Ranking bookmakers por liga |
+| GET | `/api/bookmakers/{bookmaker}/detail` | Detalle score bookmaker |
+| POST | `/api/bookmakers/refresh-scores` | Recalcular scores bookmakers |
+| GET | `/api/bookmakers/leagues` | Ligas disponibles para bookmakers |
+| GET | `/api/paper/portfolios` | Listar portfolios |
+| POST | `/api/paper/portfolios` | Crear portfolio |
+| GET | `/api/paper/portfolios/{id}` | Detalle portfolio |
+| GET | `/api/paper/portfolios/{id}/performance` | Métricas completas |
+| GET | `/api/paper/portfolios/{id}/picks` | Listar picks |
+| GET | `/api/paper/portfolios/{id}/pending` | Picks pendientes |
+| POST | `/api/paper/portfolios/{id}/picks` | Colocar pick manual |
+| POST | `/api/paper/portfolios/{id}/picks/from-recommendation` | Pick desde recomendación |
+| POST | `/api/paper/picks/{pick_id}/cancel` | Cancelar pick pendiente |
+| POST | `/api/paper/picks/{pick_id}/settle` | Settle manual pick |
+| POST | `/api/paper/portfolios/{id}/auto-settle` | Auto-settle pendientes |
+| GET | `/api/paper/portfolios/{id}/activity` | Historial actividad |
+| GET | `/api/risk/portfolio/{id}/dashboard` | Dashboard riesgo completo |
+| GET | `/api/risk/portfolio/{id}/metrics` | Métricas de riesgo |
+| GET | `/api/risk/portfolio/{id}/limits` | Límites configurados |
+| POST | `/api/risk/portfolio/{id}/limits` | Actualizar límites |
+| GET | `/api/risk/portfolio/{id}/correlations` | Análisis correlaciones |
+| GET | `/api/risk/portfolio/{id}/alerts` | Alertas activas |
+| POST | `/api/risk/alerts/{alert_id}/acknowledge` | Reconocer alerta |
+| POST | `/api/risk/portfolio/{id}/check` | Check riesgo completo |
+| POST | `/api/risk/portfolio/{id}/optimize-kelly` | Optimizar Kelly con constraints |
+| POST | `/api/risk/portfolio/{id}/init-defaults` | Inicializar límites por defecto |
+| GET | `/api/ml/models` | Listar modelos registrados |
+| GET | `/api/ml/models/{name}/champion` | Modelo campeón actual |
+| GET | `/api/ml/models/{name}/lineage` | Lineage del modelo |
+| GET | `/api/ml/models/compare` | Comparar versiones |
+| POST | `/api/ml/models/{name}/promote` | Promover challenger a champion |
+| POST | `/api/ml/models/{name}/archive` | Archivar versión |
+| GET | `/api/ml/training-runs` | Historial entrenamientos |
+| POST | `/api/ml/retrain` | Reentrenar modelo específico |
+| POST | `/api/ml/retrain-all` | Reentrenar todos |
+| POST | `/api/ml/optimize-ensemble` | Optuna hyperopt ensemble |
+| POST | `/api/ml/ab-experiments` | Crear experimento A/B |
+| GET | `/api/ml/ab-experiments` | Listar experimentos |
+| GET | `/api/ml/ab-experiments/{exp_id}` | Detalle experimento |
+| POST | `/api/ml/ab-experiments/{exp_id}/start` | Iniciar experimento |
+| POST | `/api/ml/ab-experiments/{exp_id}/analyze` | Analizar resultados |
+| GET | `/api/ml/features` | Features disponibles |
+| GET | `/api/analytics/attribution/{portfolio_id}` | Performance attribution |
+| GET | `/api/analytics/regime` | Regímenes históricos |
+| GET | `/api/analytics/regime/current` | Régimen actual |
+| GET | `/api/analytics/regime/history` | Historial regímenes |
+| POST | `/api/analytics/stress-test` | Ejecutar stress test |
+| GET | `/api/analytics/stress-tests` | Historial stress tests |
+| POST | `/api/analytics/monte-carlo` | Monte Carlo portfolio |
+| POST | `/api/analytics/factor-analysis` | Factor analysis (PCA) |
+| GET | `/api/analytics/factor-analysis` | Historial factor analysis |
+| POST | `/api/analytics/full-report` | Reporte completo analytics |
+| GET | `/api/analytics/reports` | Historial reportes |
 
 ---
 
@@ -452,6 +808,202 @@ CREATE TABLE bookmaker_scores (
     last_updated TEXT NOT NULL,
     UNIQUE(bookmaker, league, period_days, last_updated)
 );
+
+-- Snapshots de odds para steam move detection
+CREATE TABLE odds_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    league TEXT NOT NULL,
+    kickoff TEXT NOT NULL,
+    bookmaker TEXT NOT NULL,
+    market TEXT NOT NULL,
+    odds_home REAL,
+    odds_draw REAL,
+    odds_away REAL,
+    odds_over REAL,
+    odds_under REAL,
+    odds_btts_yes REAL,
+    odds_btts_no REAL,
+    snapshot_at TEXT NOT NULL,
+    is_sharp INTEGER DEFAULT 0,
+    UNIQUE(match_id, bookmaker, market, snapshot_at)
+);
+
+-- Paper Trading: Portfolios
+CREATE TABLE paper_portfolio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL DEFAULT 'Default',
+    initial_bankroll REAL NOT NULL DEFAULT 1000,
+    current_bankroll REAL NOT NULL DEFAULT 1000,
+    currency TEXT NOT NULL DEFAULT 'EUR',
+    kelly_fraction REAL NOT NULL DEFAULT 0.25,
+    max_bet_pct REAL NOT NULL DEFAULT 0.05,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    is_active INTEGER DEFAULT 1
+);
+
+-- Paper Trading: Picks
+CREATE TABLE paper_picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    match_id TEXT NOT NULL,
+    home_team TEXT NOT NULL,
+    away_team TEXT NOT NULL,
+    league TEXT NOT NULL,
+    kickoff TEXT NOT NULL,
+    market TEXT NOT NULL,
+    choice TEXT NOT NULL,
+    odds REAL NOT NULL,
+    probability REAL NOT NULL,
+    edge REAL,
+    kelly_stake_pct REAL,
+    stake_units REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',  -- pending, won, lost, void, settled
+    result TEXT,  -- win, loss, push
+    pnl REAL,
+    settled_at TEXT,
+    placed_at TEXT DEFAULT (datetime('now')),
+    source TEXT,  -- 'manual', 'auto', 'scheduler'
+    confidence_score INTEGER,
+    ensemble_weights TEXT,
+    expected_goals TEXT
+);
+
+-- Paper Trading: Settlements
+CREATE TABLE paper_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pick_id INTEGER NOT NULL REFERENCES paper_picks(id),
+    actual_result TEXT,  -- home_win, draw, away_win, over, under, btts_yes, btts_no
+    actual_score TEXT,  -- "2-1"
+    settled_at TEXT NOT NULL,
+    pnl REAL NOT NULL,
+    roi_pct REAL
+);
+
+-- Risk Management: Límites
+CREATE TABLE risk_limits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    limit_type TEXT NOT NULL,  -- max_exposure_league, max_exposure_market, max_correlation, max_drawdown, stop_loss_pct
+    limit_value REAL NOT NULL,
+    current_value REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(portfolio_id, limit_type)
+);
+
+-- Risk Management: Alertas
+CREATE TABLE risk_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    alert_type TEXT NOT NULL,  -- exposure_breach, correlation_high, drawdown_warning, stop_loss_triggered
+    severity TEXT NOT NULL,    -- info, warning, critical
+    message TEXT NOT NULL,
+    metric_value REAL,
+    limit_value REAL,
+    acknowledged INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    acknowledged_at TEXT
+);
+
+-- Risk Management: Correlaciones entre picks
+CREATE TABLE portfolio_correlations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER NOT NULL REFERENCES paper_portfolio(id),
+    pick_id_a INTEGER NOT NULL REFERENCES paper_picks(id),
+    pick_id_b INTEGER NOT NULL REFERENCES paper_picks(id),
+    correlation REAL NOT NULL,
+    shared_team INTEGER DEFAULT 0,      -- 1 if same team involved
+    shared_league INTEGER DEFAULT 0,    -- 1 if same league
+    shared_market INTEGER DEFAULT 0,    -- 1 if same market type
+    calculated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(pick_id_a, pick_id_b)
+);
+
+-- ML Pipeline: Versiones de modelos
+CREATE TABLE model_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name TEXT NOT NULL,           -- poisson, dixon_coles, ensemble, etc.
+    version TEXT NOT NULL,              -- semver: 1.2.3
+    parameters TEXT NOT NULL,           -- JSON con hiperparámetros
+    metrics TEXT NOT NULL,              -- JSON con métricas (brier, log_loss, roi, etc.)
+    parent_version TEXT,                -- Versión padre para lineage
+    training_config TEXT,               -- JSON con config de entrenamiento
+    artifact_path TEXT,                 -- Ruta al archivo pickle
+    is_champion INTEGER DEFAULT 0,      -- 1 si es el modelo campeón actual
+    status TEXT DEFAULT 'active',       -- active, archived, deprecated
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(model_name, version)
+);
+
+-- ML Pipeline: Ejecuciones de entrenamiento
+CREATE TABLE training_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    run_type TEXT,                      -- scheduled, manual, hyperopt, ab_test
+    lookback_days INTEGER,
+    min_matches INTEGER,
+    validation_split REAL,
+    metrics TEXT,                       -- JSON con métricas finales
+    status TEXT,                        -- running, completed, failed
+    started_at TEXT,
+    completed_at TEXT,
+    error_message TEXT
+);
+
+-- ML Pipeline: Experimentos A/B
+CREATE TABLE ab_experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_name TEXT NOT NULL,
+    champion_model TEXT NOT NULL,
+    champion_version TEXT NOT NULL,
+    challenger_model TEXT NOT NULL,
+    challenger_version TEXT NOT NULL,
+    traffic_split REAL DEFAULT 0.5,     -- % tráfico al challenger
+    min_sample_size INTEGER,
+    status TEXT DEFAULT 'draft',        -- draft, running, completed, archived
+    results TEXT,                       -- JSON con análisis estadístico
+    decision TEXT,                      -- promote_challenger, keep_champion, inconclusive
+    created_at TEXT DEFAULT (datetime('now')),
+    started_at TEXT,
+    completed_at TEXT
+);
+
+-- Advanced Analytics: Reportes
+CREATE TABLE analytics_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_type TEXT NOT NULL,          -- full_report, attribution, regime, stress_test, factor_analysis
+    portfolio_id INTEGER,
+    period_days INTEGER,
+    data TEXT NOT NULL,                 -- JSON con resultados completos
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Advanced Analytics: Historial de regímenes
+CREATE TABLE regime_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    regime_type TEXT NOT NULL,          -- bull, bear, volatile, calm, trending, mean_reverting
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    metrics TEXT,                       -- JSON con métricas del régimen
+    confidence REAL,
+    description TEXT
+);
+
+-- Advanced Analytics: Resultados stress tests
+CREATE TABLE stress_test_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    portfolio_id INTEGER,
+    scenario_name TEXT NOT NULL,
+    parameters TEXT,                    -- JSON con parámetros del escenario
+    results TEXT,                       -- JSON con métricas de resultado
+    created_at TEXT DEFAULT (datetime('now'))
+);
 ```
 
 ---
@@ -468,6 +1020,8 @@ CREATE TABLE bookmaker_scores (
 | Análisis | pandas | 2.2+ |
 | Numérico | numpy | 1.26+ |
 | Estadística | scipy | 1.14+ |
+| ML/Stats | scikit-learn | 1.5+ |
+| Optimización | optuna | 4.0+ |
 | Almacenamiento | SQLite | built-in |
 | Scraping | BeautifulSoup4 | 4.12+ |
 | Scheduler | schedule | 1.2.2 |
@@ -606,6 +1160,45 @@ git push origin main
 - CLV tracking (Closing Line Value)
 - Bookmaker quality scores
 
+### Fase 3 (v2): Bookmaker Sharp Ranking
+- CLV, accuracy, consistency, volume scoring
+- Sharp Factor ranking (0-100)
+- Dashboard bookmakers + scheduler job
+- Tabla `bookmaker_scores` + `odds_snapshots`
+
+### Fase 4 (v2): Paper Trading Simulator
+- Portfolios multi-currency con Kelly config
+- Picks manuales/auto con 6 mercados
+- Auto-settle post-partido
+- Métricas: ROI, Sharpe, Max DD, Win Rate
+- Tablas: `paper_portfolio`, `paper_picks`, `paper_settlements`
+
+### Fase 5 (v2): Advanced Risk Management
+- Límites exposición (total/liga/mercado/equipo)
+- Análisis correlación picks (shared team/league/market)
+- Stop-loss dinámico + max drawdown alerts
+- Kelly optimization con constraints convexas
+- Alertas Telegram (exposure_breach, correlation_high, drawdown_warning, stop_loss_triggered)
+- Tablas: `risk_limits`, `risk_alerts`, `portfolio_correlations`
+
+### Fase 6 (v2): ML Pipeline
+- Feature Engineering (forma, H2H, stats, ELO, PI, xG, injuries, odds)
+- Model Registry con versionado semántico + lineage
+- Champion/Challenger pattern
+- Optuna hyperopt para pesos ensemble
+- A/B testing framework (t-test, CI, MDE)
+- Auto-retrain semanal (lookback 365d, min 500 matches)
+- Tablas: `model_versions`, `training_runs`, `ab_experiments`, `feature_importance`
+
+### Fase 7 (v2): Advanced Analytics Dashboard
+- Performance Attribution (Brinson-style: selection/allocation/interaction)
+- Regime Detection (HMM/changepoint: bull/bear/volatile/calm/trending/mean_reverting)
+- Stress Testing (crash, high vol, correlation breakdown, model decay, liquidity crisis)
+- Monte Carlo Portfolio (2000 paths × 500 bets, risk-of-ruin, percentiles)
+- Factor Analysis (PCA + regresión: momentum, value, quality, size, league)
+- Full Report consolidado
+- Tablas: `analytics_reports`, `regime_history`, `stress_test_results`
+
 ### Bugs Corregidos
 - API-Football no permite `league` + `search` juntos
 - Goles en `row.all.goals` no en `row.goals`
@@ -642,14 +1235,16 @@ Las recomendaciones son de naturaleza **estadística** y **no garantizan resulta
 | `/historial` | Ver predicciones anteriores |
 | `/ayuda` | Más información |
 
-### Archivos Nuevos
+### Archivos Principales
 
 #### scheduler.py
 Sistema automatizado que:
 - Obtiene partidos de todas las ligas (prioriza: La Liga, Premier League, Serie A, Bundesliga, Ligue 1, Champions League)
 - Analiza cada partido con el Ensemble Predictor
-- Envía recomendaciones automáticas al canal de Telegram
-- Se ejecuta todos los días a las 8:00 AM
+- Detecta steam moves en bookmakers sharp
+- Actualiza bookmaker scores
+- Envía recomendaciones + alertas al canal de Telegram
+- Se ejecuta todos los días a las 8:00 AM + polling steam moves cada 5 min
 
 #### test_channel.py
 Script de prueba para verificar la conexión entre el bot y el canal.
@@ -661,7 +1256,7 @@ Script de prueba para verificar la conexión entre el bot y el canal.
 python main.py
 ```
 
-**Scheduler automático (envío al canal):**
+**Scheduler automático (envío al canal + steam moves + bookmaker ranks):**
 ```bash
 python scheduler.py
 ```
@@ -689,11 +1284,11 @@ python test_channel.py
 ### Estado Actual
 - ✅ Bot de Telegram configurado y funcionando
 - ✅ Canal de recomendaciones creado
-- ✅ Scheduler automático implementado (8:00 AM diario)
+- ✅ Scheduler automático implementado (8:00 AM diario + steam moves polling)
 - ✅ Ensemble predictor integrado (7 modelos)
-- ⏳ Pendiente: Verificar conexión bot-canal (nombre exacto del canal)
-- ⏳ Pendiente: Probar scheduler con partidos reales
+- ✅ Bookmaker ranking + steam detection integrados en scheduler
+- ✅ Paper trading + risk management + ML pipeline + analytics operativos via API web
 
 ---
 
-*Documento generado el 2026-09-04. Última actualización: 2026-10-06 - Ensemble predictor + transparencia + monte carlo + odds aggregator.*
+*Documento generado el 2026-09-04. Última actualización: 2026-10-08 - Phase 7 Advanced Analytics (attribution, regime detection, stress testing, Monte Carlo, factor analysis, scheduler jobs).*
