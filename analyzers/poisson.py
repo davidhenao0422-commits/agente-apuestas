@@ -84,3 +84,26 @@ def corner_probabilities(avg_corners_home: float, avg_corners_away: float,
                          line: float = 9.5) -> Dict:
     """Probabilidad de over/under en tiros de esquina."""
     return over_under_probabilities(avg_corners_home, avg_corners_away, line)
+
+
+class PoissonModel:
+    """Wrapper class for Poisson model functions (for ML pipeline)."""
+    
+    @staticmethod
+    def probability(lambda_val: float, k: int) -> float:
+        return poisson_probability(lambda_val, k)
+    
+    @staticmethod
+    def expected_goals(home_attack: float, away_defense: float,
+                       league_avg_goals: float = 2.5) -> float:
+        return expected_goals(home_attack, away_defense, league_avg_goals)
+    
+    @staticmethod
+    def predict_match_scores(lambda_home: float, lambda_away: float,
+                             max_goals: int = 8) -> Dict:
+        return predict_match_scores(lambda_home, lambda_away, max_goals)
+    
+    @staticmethod
+    def over_under_probabilities(lambda_home: float, lambda_away: float,
+                                  line: float = 2.5) -> Dict:
+        return over_under_probabilities(lambda_home, lambda_away, line)

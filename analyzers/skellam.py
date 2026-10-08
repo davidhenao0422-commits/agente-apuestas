@@ -120,3 +120,29 @@ def exact_handicap_lines(lambda_home: float, lambda_away: float) -> List[Dict]:
         })
     
     return results
+
+
+class SkellamModel:
+    """Wrapper class for Skellam model functions (for ML pipeline)."""
+    
+    @staticmethod
+    def probability(k: int, lambda1: float, lambda2: float) -> float:
+        return skellam_probability(k, lambda1, lambda2)
+    
+    @staticmethod
+    def cdf(k: int, lambda1: float, lambda2: float) -> float:
+        return skellam_cdf(k, lambda1, lambda2)
+    
+    @staticmethod
+    def asian_handicap(lambda_home: float, lambda_away: float,
+                       handicap: float) -> Dict:
+        return asian_handicap_probabilities(lambda_home, lambda_away, handicap)
+    
+    @staticmethod
+    def goal_difference_distribution(lambda_home: float, lambda_away: float,
+                                      max_diff: int = 6) -> Dict:
+        return goal_difference_distribution(lambda_home, lambda_away, max_diff)
+    
+    @staticmethod
+    def exact_handicap_lines(lambda_home: float, lambda_away: float) -> List[Dict]:
+        return exact_handicap_lines(lambda_home, lambda_away)

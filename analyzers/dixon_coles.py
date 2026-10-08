@@ -117,3 +117,29 @@ def time_decay_weight(match_date: str, xi: float = 0.0019) -> float:
         return math.exp(-xi * days_ago)
     except Exception:
         return 1.0
+
+
+class DixonColesModel:
+    """Wrapper class for Dixon-Coles model functions (for ML pipeline)."""
+    
+    @staticmethod
+    def tau(home_goals: int, away_goals: int,
+            lambda_home: float, lambda_away: float,
+            rho: float = 0.13) -> float:
+        return dixon_coles_tau(home_goals, away_goals, lambda_home, lambda_away, rho)
+    
+    @staticmethod
+    def probability(lambda_home: float, lambda_away: float,
+                    home_goals: int, away_goals: int,
+                    rho: float = 0.13) -> float:
+        return dixon_coles_probability(lambda_home, lambda_away, home_goals, away_goals, rho)
+    
+    @staticmethod
+    def predict_match_scores(lambda_home: float, lambda_away: float,
+                             max_goals: int = 8, rho: float = 0.13) -> Dict:
+        return predict_match_scores_dc(lambda_home, lambda_away, max_goals, rho)
+    
+    @staticmethod
+    def estimate_rho(historical_matches: list, lambda_home_avg: float,
+                     lambda_away_avg: float) -> float:
+        return estimate_rho(historical_matches, lambda_home_avg, lambda_away_avg)

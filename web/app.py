@@ -2144,7 +2144,7 @@ def list_model_versions(model_name: str = None, status: str = None):
     from analyzers.ml_pipeline import create_ml_pipeline
     pipeline = create_ml_pipeline(_get_db())
     
-    versions = pipeline.registry.get_model_versions(model_name, status)
+    versions = pipeline.registry.db.get_model_versions(model_name, status)
     return {"models": versions, "count": len(versions)}
 
 

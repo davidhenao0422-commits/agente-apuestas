@@ -153,3 +153,39 @@ def correct_score_top5_biv(lambda_home: float, lambda_away: float,
     scores.sort(key=lambda x: x[1], reverse=True)
     return [{"score": f"{s[0]}-{s[1]}", "probability": round(s[2], 4)} 
             for s in scores[:5]]
+
+
+class BivariatePoissonModel:
+    """Wrapper class for Bivariate Poisson model functions (for ML pipeline)."""
+    
+    @staticmethod
+    def probability(h: int, a: int,
+                    lambda1: float, lambda2: float, lambda3: float) -> float:
+        return bivariate_poisson_prob(h, a, lambda1, lambda2, lambda3)
+    
+    @staticmethod
+    def estimate_lambda3(historical_matches: list,
+                         lambda1: float, lambda2: float) -> float:
+        return estimate_lambda3(historical_matches, lambda1, lambda2)
+    
+    @staticmethod
+    def btts_probability(lambda_home: float, lambda_away: float,
+                         lambda3: float = 0.0) -> float:
+        return btts_probability_biv(lambda_home, lambda_away, lambda3)
+    
+    @staticmethod
+    def clean_sheet_probability(lambda_team: float, lambda_opp: float,
+                                 lambda3: float = 0.0,
+                                 team_is_home: bool = True) -> float:
+        return clean_sheet_probability_biv(lambda_team, lambda_opp, lambda3, team_is_home)
+    
+    @staticmethod
+    def predict_match_scores(lambda_home: float, lambda_away: float,
+                             lambda3: float = 0.0,
+                             max_goals: int = 8) -> Dict:
+        return predict_match_scores_biv(lambda_home, lambda_away, lambda3, max_goals)
+    
+    @staticmethod
+    def over_under(lambda_home: float, lambda_away: float,
+                   lambda3: float, line: float = 2.5) -> Dict:
+        return over_under_biv(lambda_home, lambda_away, lambda3, line)

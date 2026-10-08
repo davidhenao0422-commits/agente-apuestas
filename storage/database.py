@@ -404,7 +404,7 @@ CREATE TABLE IF NOT EXISTS regime_history (
     metrics TEXT NOT NULL,  -- JSON: volatility, trend_strength, avg_correlation, sharpe
     description TEXT,
     detected_at TEXT DEFAULT (datetime('now')),
-    confidence REAL,
+    confidence REAL
 );
 
 CREATE TABLE IF NOT EXISTS stress_test_results (
@@ -414,7 +414,7 @@ CREATE TABLE IF NOT EXISTS stress_test_results (
     parameters TEXT NOT NULL,     -- JSON params del escenario
     results TEXT NOT NULL,        -- JSON: max_dd, var, expected_shortfall, survival_prob
     runs INTEGER NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS factor_analysis_results (
@@ -425,7 +425,7 @@ CREATE TABLE IF NOT EXISTS factor_analysis_results (
     factors TEXT NOT NULL,        -- JSON: factor_name -> {exposure, contribution, t_stat, p_value}
     r_squared REAL,
     method TEXT,                  -- pca, regression, fundamental
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_analytics_reports_type ON analytics_reports(report_type);

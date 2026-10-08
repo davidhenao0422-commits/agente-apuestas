@@ -166,3 +166,9 @@ def optimize_gamma(matches: List[Dict], gamma_range: List[float] = None) -> floa
             best_gamma = gamma
     
     return best_gamma
+
+
+# Alias for ML pipeline
+class PiRatingsModel(PiRatings):
+    """Wrapper for ML pipeline compatibility."""
+    pass
